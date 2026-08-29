@@ -95,6 +95,23 @@ async fn account_info_translates_native_response() {
     )
     .await;
     assert_eq!(response["result"]["frontier"], "A");
+    assert_eq!(response["id"], 1);
+}
+
+#[tokio::test]
+async fn native_client_flattens_action_and_classifies_native_errors() {
+    let endpoint = start_native_stub().await;
+    let client = nano_rpc_gateway::NativeClient::new(endpoint).expect("native client");
+    let result = client
+        .call("account_info", &json!({"account":"nano_test"}))
+        .await
+        .expect("account result");
+    assert_eq!(result["frontier"], "A");
+    let error = client
+        .call("unknown_action", &json!({}))
+        .await
+        .expect_err("native error");
+    assert!(error.to_string().contains("unknown action"));
 }
 
 #[tokio::test]
