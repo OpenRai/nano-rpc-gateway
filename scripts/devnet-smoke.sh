@@ -33,10 +33,22 @@ curl --fail --silent --show-error \
   -H 'content-type: application/json' \
   --data '{"jsonrpc":"2.0","method":"rpc.discover","id":1}' \
   "$gateway_url/rpc" | jq -e '.result.openrpc == "1.3.2"'
-curl --fail --silent --show-error \
-  -H 'content-type: application/json' \
-  --data "$(jq -cn --arg account "$account" '{jsonrpc:"2.0",method:"account_info",params:{account:$account},id:2}')" \
-  "$gateway_url/rpc" | jq -e '.jsonrpc == "2.0" and .result != null'
+account_request="$(jq -cn --arg account "$account" '{jsonrpc:"2.0",method:"account_info",params:{account:$account},id:2}')"
+account_ready=0
+for _ in $(seq 1 "$attempts"); do
+  if curl --fail --silent --show-error \
+    -H 'content-type: application/json' \
+    --data "$account_request" \
+    "$gateway_url/rpc" | jq -e '.jsonrpc == "2.0" and .result != null' >/dev/null; then
+    account_ready=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$account_ready" != 1 ]]; then
+  echo "gateway did not reach the Nano RPC upstream after ${attempts} attempts" >&2
+  exit 1
+fi
 
 # Exercise the process path with a deliberately invalid block. A fresh devnet
 # does not contain a reusable signed block, so this verifies translation and

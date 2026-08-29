@@ -1,20 +1,18 @@
 services:
   nano:
-    # The published V28.2 image is a live-network build. Build the same
-    # source commit with the developer network selected at image-build time;
-    # using the live image here would be unsafe and would not be deterministic.
-    build:
-      context: https://github.com/nanocurrency/nano-node.git#0d8eea4524b8da626cbab50c286c48eae25c76a9
-      dockerfile: docker/node/Dockerfile
-      args:
-        NANO_NETWORK: dev
-    image: openrai/nano-node:V28.2-dev
+    # The official V28.2 image contains the pinned runtime and binaries. Select
+    # the isolated developer ledger with the node's runtime --network option;
+    # no local C++ build is needed.
+    image: nanocurrency/nano:V28.2@sha256:ae5d9421f87c4620c2285479d95e5e79a2084878058934f7ed6a6b96b6add09e
+    platform: linux/amd64
     restart: unless-stopped
+    command: ["nano_node", "daemon", "--network", "dev", "-l"]
     volumes:
-      - ./devnet/nano:/root
+      - ./devnet/nano-stable:/root
+      - ./devnet/nano-network:/etc/nano-network:ro
     ports:
-      - "127.0.0.1:7076:7076"
-      - "127.0.0.1:7078:7078"
+      - "127.0.0.1:45000:45000"
+      - "127.0.0.1:47000:47000"
     networks: [nano-private]
 
   gateway:

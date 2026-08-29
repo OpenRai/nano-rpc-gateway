@@ -36,9 +36,10 @@ On a Docker-capable host, `make container-benchmark` runs the same checks beside
 the pinned dev node and records container memory/CPU plus RPC samples; set
 `BENCHMARK_OUTPUT_FILE` to retain the raw request timings.
 
-On a host with Docker, `make devnet-smoke` builds the pinned V28.2 source with
-`NANO_NETWORK=dev`, starts the development node and gateway, checks the public
-RPC/OpenRPC/SSE paths, and tears the stack down when the smoke run exits. Use
+On a host with Docker, `make devnet-smoke` pulls the pinned official
+`nanocurrency/nano:V28.2` image, starts it with the runtime `--network dev`
+option and the Dev-network selector file, then starts the gateway, checks the
+public RPC/OpenRPC/SSE paths, and tears the stack down when the smoke run exits. Use
 `make devnet-up` and
 `./scripts/devnet-smoke.sh` when you need to keep the stack running between
 checks.
