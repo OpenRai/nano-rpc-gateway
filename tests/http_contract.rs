@@ -130,6 +130,31 @@ async fn oversized_rpc_body_is_rejected_by_gateway_limit() {
 }
 
 #[tokio::test]
+async fn metrics_expose_request_and_error_counters() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _ = rpc(
+        state.clone(),
+        r#"{"jsonrpc":"2.0","method":"account_info","params":{"account":"nano_test"},"id":1}"#,
+    )
+    .await;
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/metrics")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("metrics body")
+        .to_bytes();
+    let metrics = String::from_utf8(bytes.to_vec()).expect("metrics text");
+    assert!(metrics.contains("nano_gateway_requests_total 1"));
+    assert!(metrics.contains("nano_gateway_errors_total 0"));
+}
+
+#[tokio::test]
 async fn disabled_work_is_rejected_before_upstream_call() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let response = rpc(

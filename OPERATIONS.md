@@ -4,6 +4,11 @@ The gateway is a sidecar. Keep the Nano node's native HTTP RPC and WebSocket
 listeners on loopback or an isolated network, and expose only the gateway
 listener to integrators.
 
+The `/metrics` endpoint is deliberately small and credential-free. It exposes
+`nano_gateway_up`, `nano_gateway_upstream_ready`, request/error totals,
+currently active SSE streams, and replay/reset totals. These counters describe
+the gateway process; they are not Nano ledger or consensus metrics.
+
 1. Copy `gateway.yaml.example` to the mounted configuration directory.
 2. Set `node_rpc_url` and `node_ws_url` to the private node listeners.
 3. Leave `allow_work` and `allow_control` disabled unless the corresponding

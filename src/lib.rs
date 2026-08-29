@@ -507,8 +507,25 @@ pub struct AppState {
     pub config: Config,
     pub native: NativeClient,
     pub events: EventHub,
+    pub metrics: Metrics,
     pub verifying_key: Option<VerifyingKey>,
     pub upstream_ready: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Default)]
+pub struct Metrics {
+    pub requests: Arc<AtomicU64>,
+    pub errors: Arc<AtomicU64>,
+    pub active_streams: Arc<AtomicU64>,
+    pub replay_resets: Arc<AtomicU64>,
+}
+
+struct ActiveStreamGuard(Arc<AtomicU64>);
+
+impl Drop for ActiveStreamGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 fn sse_event(item: NanoEvent) -> Event {
@@ -527,6 +544,7 @@ impl AppState {
         Ok(Self {
             native: NativeClient::new(&config.node_rpc_url)?,
             events: EventHub::new(256),
+            metrics: Metrics::default(),
             config,
             verifying_key,
             upstream_ready: Arc::new(AtomicBool::new(false)),
@@ -738,7 +756,15 @@ async fn metrics_handler(
     let ready = u8::from(state.upstream_ready.load(Ordering::Relaxed));
     (
         [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-        format!("nano_gateway_up 1\nnano_gateway_upstream_ready {ready}\n"),
+        format!(
+            "nano_gateway_up 1\nnano_gateway_upstream_ready {ready}\n\
+nano_gateway_requests_total {}\nnano_gateway_errors_total {}\n\
+nano_gateway_active_streams {}\nnano_gateway_replay_resets_total {}\n",
+            state.metrics.requests.load(Ordering::Relaxed),
+            state.metrics.errors.load(Ordering::Relaxed),
+            state.metrics.active_streams.load(Ordering::Relaxed),
+            state.metrics.replay_resets.load(Ordering::Relaxed),
+        ),
     )
 }
 
@@ -747,11 +773,13 @@ async fn rpc_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Json<RpcResponse> {
+    state.metrics.requests.fetch_add(1, Ordering::Relaxed);
     if body
         .iter()
         .find(|byte| !byte.is_ascii_whitespace())
         .is_some_and(|byte| *byte == b'[')
     {
+        state.metrics.errors.fetch_add(1, Ordering::Relaxed);
         return Json(RpcResponse::err(
             None,
             -32600,
@@ -761,14 +789,19 @@ async fn rpc_handler(
     let request = match serde_json::from_slice::<RpcRequest>(&body) {
         Ok(request) => request,
         Err(error) => {
+            state.metrics.errors.fetch_add(1, Ordering::Relaxed);
             return Json(RpcResponse::err(
                 None,
                 -32700,
                 format!("Parse error: {error}"),
-            ))
+            ));
         }
     };
-    Json(state.dispatch(request, &headers).await)
+    let response = state.dispatch(request, &headers).await;
+    if response.error.is_some() {
+        state.metrics.errors.fetch_add(1, Ordering::Relaxed);
+    }
+    Json(response)
 }
 async fn openrpc_handler(State(state): State<AppState>) -> Json<Value> {
     Json(openrpc_document(
@@ -819,8 +852,15 @@ async fn sse_handler(
         .get("last-event-id")
         .and_then(|value| value.to_str().ok());
     let (reset, replay) = state.events.replay(cursor).await;
+    state.metrics.active_streams.fetch_add(1, Ordering::Relaxed);
+    if reset {
+        state.metrics.replay_resets.fetch_add(1, Ordering::Relaxed);
+    }
     let mut receiver = state.events.subscribe();
+    let active_streams = state.metrics.active_streams.clone();
+    let replay_resets = state.metrics.replay_resets.clone();
     let output = stream! {
+        let _guard = ActiveStreamGuard(active_streams);
         if reset {
             yield Ok::<Event, Infallible>(Event::default()
                 .event("nano.stream_reset")
@@ -838,6 +878,7 @@ async fn sse_handler(
                 }
                 Ok(_) => {}
                 Err(broadcast::error::RecvError::Lagged(_)) => {
+                    replay_resets.fetch_add(1, Ordering::Relaxed);
                     yield Ok::<Event, Infallible>(Event::default()
                         .event("nano.stream_reset")
                         .data("reconnect and reconcile with JSON-RPC"));
