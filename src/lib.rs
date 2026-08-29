@@ -267,13 +267,18 @@ pub fn openrpc_document(
         "servers": [{"name":"gateway", "url":gateway_url, "variables":{"gatewayUrl":{"default":gateway_url}}}],
         "methods": methods,
         "components": {"schemas": {
-            "AccountParams":{"type":"object","required":["account"],"properties":{"account":{"type":"string"}}},
-            "AccountInfoParams":{"$ref":"#/components/schemas/AccountParams"}, "AccountBalanceResult":{"type":"object"}, "AccountHistoryResult":{"type":"object"},
-            "AccountInfoResult":{"type":"object"}, "AccountHistoryParams":{"type":"object","required":["account"],"properties":{"account":{"type":"string"},"count":{"type":"integer"}}},
-            "BlockParams":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string"}}}, "BlockInfoResult":{"type":"object"},
-            "BlocksParams":{"type":"object","required":["hashes"],"properties":{"hashes":{"type":"array","items":{"type":"string"}}}}, "BlocksInfoResult":{"type":"object"},
-            "ProcessParams":{"type":"object","required":["block"],"properties":{"block":{"type":"object"}}}, "ProcessResult":{"type":"object"},
-            "WorkGenerateParams":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string"}}}, "WorkGenerateResult":{"type":"object"}
+            "AccountParams":{"type":"object","required":["account"],"properties":{"account":{"type":"string","minLength":1}}},
+            "AccountInfoParams":{"$ref":"#/components/schemas/AccountParams"},
+            "AccountBalanceResult":{"type":"object","required":["balance","pending"],"properties":{"balance":{"type":"string"},"pending":{"type":"string"}}},
+            "AccountHistoryResult":{"type":"object","required":["account","history"],"properties":{"account":{"type":"string"},"history":{"type":"array"}}},
+            "AccountInfoResult":{"type":"object","required":["frontier","open_block","representative_block","balance","modified_timestamp","block_count","account_version","confirmation_height","confirmation_height_frontier"],"properties":{"frontier":{"type":"string"},"open_block":{"type":"string"},"representative_block":{"type":"string"},"balance":{"type":"string"},"modified_timestamp":{"type":"string"},"block_count":{"type":"string"},"account_version":{"type":"string"},"confirmation_height":{"type":"string"},"confirmation_height_frontier":{"type":"string"}}},
+            "AccountHistoryParams":{"type":"object","required":["account"],"properties":{"account":{"type":"string","minLength":1},"count":{"type":"integer","minimum":1}}},
+            "BlockParams":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string","minLength":1}}},
+            "BlockInfoResult":{"type":"object","required":["block_account","amount","balance","height","contents"],"properties":{"block_account":{"type":"string"},"amount":{"type":"string"},"balance":{"type":"string"},"height":{"type":"string"},"contents":{"type":"string"}}},
+            "BlocksParams":{"type":"object","required":["hashes"],"properties":{"hashes":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
+            "BlocksInfoResult":{"type":"object","required":["blocks"],"properties":{"blocks":{"type":"object"}}},
+            "ProcessParams":{"type":"object","required":["block"],"properties":{"block":{"type":"object"}}}, "ProcessResult":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string"}}},
+            "WorkGenerateParams":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string","minLength":1}}}, "WorkGenerateResult":{"type":"object","required":["hash","work","difficulty","multiplier"],"properties":{"hash":{"type":"string"},"work":{"type":"string"},"difficulty":{"type":"string"},"multiplier":{"type":"string"}}}
         }}, "x-nano-profile": profile
     })
 }
@@ -530,8 +535,14 @@ impl AppState {
             return RpcResponse::err(request.id, -32602, message);
         }
         match self.native.call(spec.name, &params).await {
-            Ok(result) if result.is_object() => RpcResponse::ok(request.id, result),
-            Ok(_) => RpcResponse::err(request.id, -32000, "Upstream result is not an object"),
+            Ok(result) if validate_result(spec.name, &result) => {
+                RpcResponse::ok(request.id, result)
+            }
+            Ok(_) => RpcResponse::err(
+                request.id,
+                -32000,
+                "Upstream result does not match the selected profile schema",
+            ),
             Err(error) => RpcResponse::err(request.id, -32000, error.to_string()),
         }
     }
@@ -578,9 +589,10 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
     let valid = match required {
         "account" | "hash" => value.as_str().is_some_and(|value| !value.is_empty()),
         "hashes" => value.as_array().is_some_and(|values| {
-            values
-                .iter()
-                .all(|value| value.as_str().is_some_and(|value| !value.is_empty()))
+            !values.is_empty()
+                && values
+                    .iter()
+                    .all(|value| value.as_str().is_some_and(|value| !value.is_empty()))
         }),
         "block" => value.is_object(),
         _ => true,
@@ -588,7 +600,57 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
     if !valid {
         return Err(format!("invalid parameter: {required}"));
     }
+    if method == "account_history"
+        && object
+            .get("count")
+            .is_some_and(|count| !count.as_i64().is_some_and(|value| value >= 1))
+    {
+        return Err("invalid parameter: count".into());
+    }
     Ok(())
+}
+
+fn has_string(object: &serde_json::Map<String, Value>, name: &str) -> bool {
+    object
+        .get(name)
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn validate_result(method: &str, result: &Value) -> bool {
+    let Some(object) = result.as_object() else {
+        return false;
+    };
+    match method {
+        "account_info" => [
+            "frontier",
+            "open_block",
+            "representative_block",
+            "balance",
+            "modified_timestamp",
+            "block_count",
+            "account_version",
+            "confirmation_height",
+            "confirmation_height_frontier",
+        ]
+        .iter()
+        .all(|field| has_string(object, field)),
+        "account_balance" => ["balance", "pending"]
+            .iter()
+            .all(|field| has_string(object, field)),
+        "account_history" => {
+            has_string(object, "account") && object.get("history").is_some_and(Value::is_array)
+        }
+        "block_info" => ["block_account", "amount", "balance", "height", "contents"]
+            .iter()
+            .all(|field| has_string(object, field)),
+        "blocks_info" => object.get("blocks").is_some_and(Value::is_object),
+        "process" => has_string(object, "hash"),
+        "work_generate" => ["hash", "work", "difficulty", "multiplier"]
+            .iter()
+            .all(|field| has_string(object, field)),
+        _ => false,
+    }
 }
 
 pub fn app(state: AppState) -> Router {
@@ -957,6 +1019,23 @@ mod tests {
     #[test]
     fn params_reject_non_string_account() {
         assert!(validate_params("account_info", &json!({"account": 7})).is_err());
+    }
+
+    #[test]
+    fn result_shapes_are_checked_against_the_profile() {
+        assert!(validate_result("process", &json!({"hash": "A"})));
+        assert!(!validate_result("process", &json!({"hash": 7})));
+        assert!(!validate_result("account_info", &json!({"frontier": "A"})));
+    }
+
+    #[test]
+    fn collection_parameters_follow_profile_limits() {
+        assert!(validate_params(
+            "account_history",
+            &json!({"account": "nano_test", "count": 0})
+        )
+        .is_err());
+        assert!(validate_params("blocks_info", &json!({"hashes": []})).is_err());
     }
     #[test]
     fn playground_url_uses_gateway_root_schema_by_default() {

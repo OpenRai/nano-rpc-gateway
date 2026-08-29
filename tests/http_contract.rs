@@ -11,7 +11,24 @@ use tower::ServiceExt;
 async fn start_native_stub() -> String {
     let router = Router::new().route(
         "/",
-        post(|| async { Json(json!({"frontier":"A", "balance":"0"})) }),
+        post(|Json(body): Json<Value>| async move {
+            let response = match body["action"].as_str() {
+                Some("account_info") => json!({
+                    "frontier":"A", "open_block":"B", "representative_block":"C",
+                    "balance":"0", "modified_timestamp":"0", "block_count":"1",
+                    "account_version":"0", "confirmation_height":"1",
+                    "confirmation_height_frontier":"A"
+                }),
+                Some("account_balance") => json!({"balance":"0", "pending":"0"}),
+                Some("account_history") => json!({"account":"nano_test", "history": []}),
+                Some("block_info") => json!({"block_account":"nano_test", "amount":"0", "balance":"0", "height":"1", "contents":"{}"}),
+                Some("blocks_info") => json!({"blocks": {}}),
+                Some("process") => json!({"hash":"A"}),
+                Some("work_generate") => json!({"hash":"A", "work":"B", "difficulty":"C", "multiplier":"1"}),
+                _ => json!({"error":"unknown action"}),
+            };
+            Json(response)
+        }),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind stub");
     let address = listener.local_addr().expect("stub address");
@@ -179,7 +196,7 @@ async fn valid_work_token_reaches_node_delegation() {
         &token,
     )
     .await;
-    assert_eq!(response["result"]["frontier"], "A");
+    assert_eq!(response["result"]["hash"], "A");
 }
 
 #[tokio::test]
