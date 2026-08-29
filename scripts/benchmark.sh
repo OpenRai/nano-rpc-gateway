@@ -3,8 +3,18 @@ set -euo pipefail
 
 gateway_url="${GATEWAY_URL:-http://127.0.0.1:8090}"
 requests="${REQUESTS:-100}"
+output_file="${OUTPUT_FILE:-}"
 
-printf 'gateway=%s requests=%s\n' "$gateway_url" "$requests"
+if [[ -z "$output_file" ]]; then
+  output_file="$(mktemp "${TMPDIR:-/tmp}/nano-rpc-gateway-benchmark.XXXXXX")"
+  cleanup_output=true
+else
+  cleanup_output=false
+  : >"$output_file"
+fi
+trap 'if [[ "$cleanup_output" == true ]]; then rm -f "$output_file"; fi' EXIT
+
+printf 'gateway=%s requests=%s raw=%s\n' "$gateway_url" "$requests" "$output_file"
 printf 'health: '
 curl --fail --silent --show-error "$gateway_url/health"
 printf '\n'
@@ -12,8 +22,20 @@ printf '\n'
 for _ in $(seq 1 "$requests"); do
   curl --fail --silent --show-error \
     -H 'content-type: application/json' \
+    -w '%{time_total}\n' \
     --data '{"jsonrpc":"2.0","method":"account_info","params":{"account":"nano_test"},"id":1}' \
-    "$gateway_url/rpc" >/dev/null
+    "$gateway_url/rpc" -o /dev/null >>"$output_file"
 done
 
-printf 'completed=%s\n' "$requests"
+awk -v requests="$requests" '
+  { values[NR] = $1; sum += $1; sumsq += $1 * $1 }
+  END {
+    if (NR == 0) { exit 1 }
+    for (i = 1; i <= NR; i++) sorted[i] = values[i]
+    for (i = 1; i <= NR; i++) for (j = i + 1; j <= NR; j++) if (sorted[j] < sorted[i]) { t = sorted[i]; sorted[i] = sorted[j]; sorted[j] = t }
+    p50 = sorted[int((NR + 1) * 0.50)]; p95 = sorted[int((NR + 1) * 0.95)]
+    mean = sum / NR; variance = (sumsq / NR) - (mean * mean)
+    if (variance < 0) variance = 0
+    printf "completed=%d p50_seconds=%.6f p95_seconds=%.6f min_seconds=%.6f max_seconds=%.6f mean_seconds=%.6f stddev_seconds=%.6f\n", NR, p50, p95, sorted[1], sorted[NR], mean, sqrt(variance)
+  }
+' "$output_file"

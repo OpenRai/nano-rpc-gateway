@@ -27,7 +27,8 @@ not part of the gateway process or production image; omit `--serve` to print a
 hosted Playground URL instead.
 
 Operational deployment and isolation guidance is in [OPERATIONS.md](OPERATIONS.md);
-the reproducible request harness is [scripts/benchmark.sh](scripts/benchmark.sh).
+the reproducible request harness is [scripts/benchmark.sh](scripts/benchmark.sh),
+with the first local-only result in [benchmarks/v0.1-loopback.md](benchmarks/v0.1-loopback.md).
 Current compatibility evidence is recorded in [compatibility/v0.1.md](compatibility/v0.1.md).
 
 Read [DESIGN.md](DESIGN.md) for the complete design, evidence boundaries, open
