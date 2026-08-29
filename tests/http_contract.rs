@@ -190,6 +190,36 @@ async fn confirmation_stream_uses_event_stream_content_type() {
 }
 
 #[tokio::test]
+async fn confirmation_stream_emits_reset_for_unknown_generation() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account":"nano_test","hash":"A"}),
+        )
+        .await;
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/events/confirmations?accounts=nano_test")
+        .header("last-event-id", "old-generation:0")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    let mut body = response.into_body();
+    let frame = body
+        .frame()
+        .await
+        .expect("reset frame")
+        .expect("reset data")
+        .into_data()
+        .expect("reset bytes");
+    let text = String::from_utf8(frame.to_vec()).expect("reset text");
+    assert!(text.contains("event: nano.stream_reset"));
+    assert!(text.contains("reconcile with JSON-RPC"));
+}
+
+#[tokio::test]
 async fn readiness_tracks_native_subscription_state() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let request = axum::http::Request::builder()
