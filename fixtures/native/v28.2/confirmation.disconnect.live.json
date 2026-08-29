@@ -1,0 +1,1 @@
+{"event":"nano.stream_reset","data":{"reason":"upstream_disconnect","profile":"nano-node/V28.2","reconcile":"Query account_info for affected accounts before applying new confirmations"},"provenance":{"implementation":"nano-node","release":"V28.2","network":"dev","capture_method":"gateway SSE while the native WebSocket process was stopped","captured":"2026-08-29","status":"PASS"}}

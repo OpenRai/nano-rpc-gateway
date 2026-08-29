@@ -933,6 +933,7 @@ async fn sse_handler(
 
 pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
     state.upstream_ready.store(false, Ordering::Relaxed);
+    let mut connected = false;
     let result = async {
         validate_upstream_url(&state.config.node_ws_url, &["ws", "wss"])?;
         let (mut socket, _) = connect_async(&state.config.node_ws_url)
@@ -944,6 +945,7 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
             ))
             .await
             .map_err(|e| GatewayError::Upstream(e.to_string()))?;
+        connected = true;
         state.upstream_ready.store(true, Ordering::Relaxed);
         while let Some(message) = socket.next().await {
             if let Message::Text(text) =
@@ -960,17 +962,19 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
     }
     .await;
     state.upstream_ready.store(false, Ordering::Relaxed);
-    state
-        .events
-        .publish(
-            "nano.stream_reset",
-            json!({
-                "reason": if result.is_err() { "upstream_disconnect" } else { "upstream_closed" },
-                "profile": state.config.profile,
-                "reconcile": "Query account_info for affected accounts before applying new confirmations"
-            }),
-        )
-        .await;
+    if connected {
+        state
+            .events
+            .publish(
+                "nano.stream_reset",
+                json!({
+                    "reason": if result.is_err() { "upstream_disconnect" } else { "upstream_closed" },
+                    "profile": state.config.profile,
+                    "reconcile": "Query account_info for affected accounts before applying new confirmations"
+                }),
+            )
+            .await;
+    }
     result
 }
 
@@ -1267,6 +1271,7 @@ mod tests {
             include_str!("../fixtures/native/v28.2/process.success.response.json"),
             include_str!("../fixtures/native/v28.2/confirmation_subscription.ack.json"),
             include_str!("../fixtures/native/v28.2/confirmation.live.json"),
+            include_str!("../fixtures/native/v28.2/confirmation.disconnect.live.json"),
         ] {
             serde_json::from_str::<Value>(fixture).expect("fixture JSON");
         }
@@ -1284,6 +1289,11 @@ mod tests {
         .expect("confirmation response");
         assert_eq!(confirmation["profile"], "nano-node/V28.2");
         assert!(confirmation["hash"].as_str().is_some());
+        let disconnect: Value = serde_json::from_str(include_str!(
+            "../fixtures/native/v28.2/confirmation.disconnect.live.json"
+        ))
+        .expect("disconnect response");
+        assert_eq!(disconnect["data"]["reason"], "upstream_disconnect");
     }
     #[test]
     fn confirmation_normalization_filters_acks_and_adds_profile() {
@@ -1361,7 +1371,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn websocket_failure_publishes_reconciliation_reset() {
+    async fn websocket_connection_failure_does_not_emit_spurious_reset() {
         let config = Config {
             node_ws_url: "ws://127.0.0.1:1".into(),
             ..Config::default()
@@ -1369,9 +1379,7 @@ mod tests {
         let state = AppState::new(config).expect("state");
         assert!(run_ws_bridge(state.clone()).await.is_err());
         let (_, events) = state.events.replay(None).await;
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event, "nano.stream_reset");
-        assert_eq!(events[0].data["reason"], "upstream_disconnect");
+        assert!(events.is_empty());
     }
 
     #[tokio::test]
