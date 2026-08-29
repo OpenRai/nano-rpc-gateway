@@ -468,7 +468,7 @@ The proposed first interface creates a stream with one HTTP request:
 ```http
 GET /events/confirmations?accounts=nano_...,nano_...
 Accept: text/event-stream
-Last-Event-ID: 182736
+Last-Event-ID: 7:182736
 ```
 
 Illustrative event:
@@ -503,17 +503,12 @@ until direct streams prove insufficient.
 
 ### 12.4 Event identity
 
-Every resumable SSE event needs an identifier meaningful within a documented
-scope. Candidate scopes include:
-
-- one gateway process lifetime;
-- one upstream connection generation;
-- one retained event buffer; or
-- a durable gateway event log.
-
-The first implementation should prefer a monotonically increasing gateway
-sequence within one retained buffer. The stream must identify a new generation
-after restart or upstream resubscription.
+Every resumable SSE event uses `generation:sequence`. The generation identifies
+one gateway process lifetime; the sequence increases monotonically within that
+generation and retained buffer. A cursor from another generation, an invalid
+cursor, or a cursor older than the retained window causes `nano.stream_reset`.
+The gateway then sends the retained events it can still provide, and the client
+must reconcile authoritative state before treating them as complete history.
 
 ### 12.5 Ordering
 
@@ -525,8 +520,11 @@ The gateway must document whether ordering applies:
 - per event topic; or
 - only in gateway observation order.
 
-The gateway must not imply ledger finality or causal ordering from arrival order
-unless tests and node guarantees support that claim.
+The gateway preserves its own observation order only. It must not imply ledger
+finality or causal ordering from that order. A repeated confirmation with the
+same event name, account, and hash is suppressed while it remains in the local
+retention window; this is bounded duplicate suppression, not a durable exactly-
+once guarantee.
 
 ### 12.6 Overflow and loss
 
@@ -549,7 +547,8 @@ The proposed initial contract is bounded replay with explicit reset:
 
 1. The client reconnects with `Last-Event-ID`.
 2. The gateway replays retained events when the identifier remains available.
-3. The gateway emits `nano.stream_reset` when continuity cannot be proven.
+3. The gateway emits `nano.stream_reset` when continuity cannot be proven,
+   including an upstream disconnect or a cursor from an older generation.
 4. The client queries authoritative state through JSON-RPC.
 5. The client resumes event processing from the new stream generation.
 

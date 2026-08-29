@@ -5,7 +5,7 @@ use std::{
     convert::Infallible,
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -393,6 +393,7 @@ fn validate_upstream_url(endpoint: &str, schemes: &[&str]) -> Result<(), Gateway
 
 #[derive(Clone)]
 pub struct EventHub {
+    generation: String,
     next: Arc<Mutex<u64>>,
     history: Arc<Mutex<VecDeque<NanoEvent>>>,
     tx: broadcast::Sender<NanoEvent>,
@@ -408,8 +409,15 @@ pub struct NanoEvent {
 
 impl EventHub {
     pub fn new(capacity: usize) -> Self {
+        static GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let counter = GENERATION_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
         let (tx, _) = broadcast::channel(capacity.max(1));
         Self {
+            generation: format!("{timestamp:x}-{counter:x}"),
             next: Arc::new(Mutex::new(0)),
             history: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),
             tx,
@@ -417,14 +425,25 @@ impl EventHub {
         }
     }
     pub async fn publish(&self, event: impl Into<String>, data: Value) -> NanoEvent {
+        let mut history = self.history.lock().await;
+        let event = event.into();
+        if let Some(existing) = history.iter().find(|item| {
+            item.event == event
+                && item.data.get("hash").and_then(Value::as_str)
+                    == data.get("hash").and_then(Value::as_str)
+                && item.data.get("account").and_then(Value::as_str)
+                    == data.get("account").and_then(Value::as_str)
+                && item.data.get("hash").is_some()
+        }) {
+            return existing.clone();
+        }
         let mut next = self.next.lock().await;
         *next += 1;
         let item = NanoEvent {
-            id: next.to_string(),
-            event: event.into(),
+            id: format!("{}:{next}", self.generation),
+            event,
             data,
         };
-        let mut history = self.history.lock().await;
         history.push_back(item.clone());
         while history.len() > self.capacity {
             history.pop_front();
@@ -432,17 +451,32 @@ impl EventHub {
         let _ = self.tx.send(item.clone());
         item
     }
-    async fn replay(&self, cursor: Option<u64>) -> (bool, Vec<NanoEvent>) {
+    async fn replay(&self, cursor: Option<&str>) -> (bool, Vec<NanoEvent>) {
         let history = self.history.lock().await;
-        let reset = cursor.is_some_and(|requested| {
-            history
-                .front()
-                .and_then(|item| item.id.parse::<u64>().ok())
-                .is_some_and(|oldest| requested < oldest.saturating_sub(1))
-        });
+        let parsed = cursor.and_then(parse_event_cursor);
+        let same_generation = parsed
+            .as_ref()
+            .is_some_and(|(generation, _)| generation == &self.generation);
+        let oldest = history
+            .front()
+            .and_then(|item| parse_event_cursor(&item.id));
+        let reset = cursor.is_some()
+            && (!same_generation
+                || parsed.as_ref().is_none_or(|(_, requested)| {
+                    oldest
+                        .as_ref()
+                        .is_some_and(|(_, oldest)| *requested < oldest.saturating_sub(1))
+                }));
+        let sequence = parsed
+            .filter(|(generation, _)| generation == &self.generation)
+            .map(|(_, sequence)| sequence);
         let events = history
             .iter()
-            .filter(|item| cursor.is_none_or(|cursor| item.id.parse::<u64>().unwrap_or(0) > cursor))
+            .filter(|item| {
+                sequence.is_none_or(|cursor| {
+                    parse_event_cursor(&item.id).is_some_and(|(_, sequence)| sequence > cursor)
+                })
+            })
             .cloned()
             .collect();
         (reset, events)
@@ -450,6 +484,11 @@ impl EventHub {
     fn subscribe(&self) -> broadcast::Receiver<NanoEvent> {
         self.tx.subscribe()
     }
+}
+
+fn parse_event_cursor(value: &str) -> Option<(String, u64)> {
+    let (generation, sequence) = value.split_once(':')?;
+    Some((generation.to_owned(), sequence.parse().ok()?))
 }
 
 #[derive(Clone)]
@@ -746,6 +785,9 @@ impl EventsQuery {
 }
 
 fn event_matches_accounts(item: &NanoEvent, accounts: Option<&[String]>) -> bool {
+    if item.event != "nano.confirmation" {
+        return true;
+    }
     let Some(accounts) = accounts else {
         return true;
     };
@@ -763,8 +805,7 @@ async fn sse_handler(
     let accounts = query.account_filter();
     let cursor = headers
         .get("last-event-id")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok());
+        .and_then(|value| value.to_str().ok());
     let (reset, replay) = state.events.replay(cursor).await;
     let mut receiver = state.events.subscribe();
     let output = stream! {
@@ -836,6 +877,19 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
     }
     .await;
     state.upstream_ready.store(false, Ordering::Relaxed);
+    if result.is_err() {
+        state
+            .events
+            .publish(
+                "nano.stream_reset",
+                json!({
+                    "reason": "upstream_disconnect",
+                    "profile": state.config.profile,
+                    "reconcile": "Query account_info for affected accounts before applying new confirmations"
+                }),
+            )
+            .await;
+    }
     result
 }
 
@@ -1136,8 +1190,64 @@ mod tests {
         hub.publish("nano.confirmation", json!({"hash":"a"})).await;
         hub.publish("nano.confirmation", json!({"hash":"b"})).await;
         hub.publish("nano.confirmation", json!({"hash":"c"})).await;
-        let (reset, events) = hub.replay(Some(0)).await;
+        let (reset, events) = hub.replay(Some("old-generation:0")).await;
         assert!(reset);
         assert_eq!(events.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn event_hub_replays_after_same_generation_cursor() {
+        let hub = EventHub::new(4);
+        let first = hub.publish("nano.confirmation", json!({"hash":"a"})).await;
+        hub.publish("nano.confirmation", json!({"hash":"b"})).await;
+        let (reset, events) = hub.replay(Some(&first.id)).await;
+        assert!(!reset);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data["hash"], "b");
+    }
+
+    #[tokio::test]
+    async fn event_hub_deduplicates_recent_confirmation_hashes() {
+        let hub = EventHub::new(4);
+        let first = hub
+            .publish(
+                "nano.confirmation",
+                json!({"hash":"A","account":"nano_test"}),
+            )
+            .await;
+        let duplicate = hub
+            .publish(
+                "nano.confirmation",
+                json!({"hash":"A","account":"nano_test"}),
+            )
+            .await;
+        assert_eq!(first.id, duplicate.id);
+        let (_, events) = hub.replay(None).await;
+        assert_eq!(events.len(), 1);
+        assert!(events[0].id.contains(':'));
+    }
+
+    #[test]
+    fn stream_control_events_bypass_account_filters() {
+        let item = NanoEvent {
+            id: "1".into(),
+            event: "nano.stream_reset".into(),
+            data: json!({"reason":"upstream_disconnect"}),
+        };
+        assert!(event_matches_accounts(&item, Some(&["nano_other".into()])));
+    }
+
+    #[tokio::test]
+    async fn websocket_failure_publishes_reconciliation_reset() {
+        let config = Config {
+            node_ws_url: "ws://127.0.0.1:1".into(),
+            ..Config::default()
+        };
+        let state = AppState::new(config).expect("state");
+        assert!(run_ws_bridge(state.clone()).await.is_err());
+        let (_, events) = state.events.replay(None).await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event, "nano.stream_reset");
+        assert_eq!(events[0].data["reason"], "upstream_disconnect");
     }
 }
