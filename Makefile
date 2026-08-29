@@ -1,4 +1,4 @@
-.PHONY: check test clippy playground benchmark transport-smoke devnet-up devnet-smoke devnet-down
+.PHONY: check test clippy playground benchmark resource-benchmark transport-smoke devnet-up devnet-smoke devnet-down
 check:
 	cargo check --locked
 test:
@@ -9,6 +9,8 @@ playground:
 	cargo run -- playground --gateway-url "$${GATEWAY_URL:-http://127.0.0.1:8090/rpc}" --serve --launch
 benchmark:
 	./scripts/benchmark.sh
+resource-benchmark:
+	./scripts/resource-benchmark.sh
 transport-smoke:
 	./scripts/transport-smoke.sh
 devnet-up:

@@ -5,6 +5,10 @@ gateway_url="${GATEWAY_URL:-http://127.0.0.1:8090}"
 requests="${REQUESTS:-100}"
 output_file="${OUTPUT_FILE:-}"
 protocol="${PROTOCOL:-http1.1}"
+tls_args=()
+if [[ "${INSECURE_TLS:-0}" == "1" ]]; then
+  tls_args+=(--insecure)
+fi
 
 case "$protocol" in
   http1.1) protocol_args=(--http1.1) ;;
@@ -23,11 +27,11 @@ trap 'if [[ "$cleanup_output" == true ]]; then rm -f "$output_file"; fi' EXIT
 
 printf 'gateway=%s protocol=%s requests=%s raw=%s\n' "$gateway_url" "$protocol" "$requests" "$output_file"
 printf 'health: '
-curl "${protocol_args[@]}" --fail --silent --show-error "$gateway_url/health"
+curl "${protocol_args[@]}" "${tls_args[@]}" --fail --silent --show-error "$gateway_url/health"
 printf '\n'
 
 for _ in $(seq 1 "$requests"); do
-  curl "${protocol_args[@]}" --fail --silent --show-error \
+  curl "${protocol_args[@]}" "${tls_args[@]}" --fail --silent --show-error \
     -H 'content-type: application/json' \
     -w '%{time_total}\n' \
     --data '{"jsonrpc":"2.0","method":"account_info","params":{"account":"nano_test"},"id":1}' \

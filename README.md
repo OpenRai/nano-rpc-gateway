@@ -30,6 +30,8 @@ Operational deployment and isolation guidance is in [OPERATIONS.md](OPERATIONS.m
 the reproducible request harness is [scripts/benchmark.sh](scripts/benchmark.sh),
 with the first local-only result in [benchmarks/v0.1-loopback.md](benchmarks/v0.1-loopback.md).
 Current compatibility evidence is recorded in [compatibility/v0.1.md](compatibility/v0.1.md).
+For gateway-only startup and idle-RSS sampling, use `make resource-benchmark`;
+the measured local result is in [benchmarks/v0.1-resource.md](benchmarks/v0.1-resource.md).
 
 On a host with Docker, `make devnet-smoke` starts the pinned V28.2 development
 node and gateway, checks the public RPC/OpenRPC/SSE paths, and tears the stack
