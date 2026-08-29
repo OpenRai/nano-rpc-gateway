@@ -6,8 +6,10 @@ listener to integrators.
 
 The `/metrics` endpoint is deliberately small and credential-free. It exposes
 `nano_gateway_up`, `nano_gateway_upstream_ready`, request/error totals,
-currently active SSE streams, and replay/reset totals. These counters describe
-the gateway process; they are not Nano ledger or consensus metrics.
+request-duration sum/count, active SSE streams, replay hit/miss/reset totals,
+bounded-overflow resets, and upstream reconnect totals. These counters describe
+the gateway process; they are not Nano ledger or consensus metrics. No account,
+hash, request ID, token, or raw error text is used as a metric label.
 
 1. Copy `gateway.yaml.example` to the mounted configuration directory.
 2. Set `node_rpc_url` and `node_ws_url` to the private node listeners.

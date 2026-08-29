@@ -43,6 +43,10 @@ enum CommandKind {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // axum-server selects the aws-lc-rs Rustls backend while reqwest also
+    // enables ring. Install the server provider explicitly so TLS startup is
+    // deterministic when both backends are present in the dependency graph.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     tracing_subscriber::fmt()
         .with_env_filter("info")
         .json()

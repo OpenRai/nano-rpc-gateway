@@ -8,14 +8,14 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use async_stream::stream;
 use axum::{
     body::Bytes,
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -45,6 +45,9 @@ allow_control: false
 auth_public_key: null
 enable_discovery: true
 "#;
+const EVENT_HISTORY_CAPACITY: usize = 256;
+const MAX_ACCOUNT_FILTER_BYTES: usize = 4096;
+const MAX_ACCOUNT_FILTER_ITEMS: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -368,11 +371,18 @@ pub struct NativeClient {
 
 impl NativeClient {
     pub fn new(endpoint: impl Into<String>) -> Result<Self, GatewayError> {
+        Self::with_timeout(endpoint, Duration::from_secs(10))
+    }
+
+    pub fn with_timeout(
+        endpoint: impl Into<String>,
+        timeout: Duration,
+    ) -> Result<Self, GatewayError> {
         let endpoint = endpoint.into();
         validate_upstream_url(&endpoint, &["http", "https"])?;
         Ok(Self {
             client: Client::builder()
-                .timeout(Duration::from_secs(10))
+                .timeout(timeout)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|e| GatewayError::Upstream(e.to_string()))?,
@@ -531,6 +541,7 @@ pub struct AppState {
     pub metrics: Metrics,
     pub verifying_key: Option<VerifyingKey>,
     pub upstream_ready: Arc<AtomicBool>,
+    upstream_seen: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Default)]
@@ -539,9 +550,31 @@ pub struct Metrics {
     pub errors: Arc<AtomicU64>,
     pub active_streams: Arc<AtomicU64>,
     pub replay_resets: Arc<AtomicU64>,
+    pub replay_hits: Arc<AtomicU64>,
+    pub replay_misses: Arc<AtomicU64>,
+    pub overflow_resets: Arc<AtomicU64>,
+    pub upstream_reconnects: Arc<AtomicU64>,
+    pub request_duration_ms_sum: Arc<AtomicU64>,
+    pub request_duration_ms_count: Arc<AtomicU64>,
 }
 
 struct ActiveStreamGuard(Arc<AtomicU64>);
+
+struct RequestMetricsGuard {
+    metrics: Metrics,
+    started: Instant,
+}
+
+impl Drop for RequestMetricsGuard {
+    fn drop(&mut self) {
+        self.metrics
+            .request_duration_ms_sum
+            .fetch_add(self.started.elapsed().as_millis() as u64, Ordering::Relaxed);
+        self.metrics
+            .request_duration_ms_count
+            .fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 impl Drop for ActiveStreamGuard {
     fn drop(&mut self) {
@@ -564,11 +597,12 @@ impl AppState {
             .transpose()?;
         Ok(Self {
             native: NativeClient::new(&config.node_rpc_url)?,
-            events: EventHub::new(256),
+            events: EventHub::new(EVENT_HISTORY_CAPACITY),
             metrics: Metrics::default(),
             config,
             verifying_key,
             upstream_ready: Arc::new(AtomicBool::new(false)),
+            upstream_seen: Arc::new(AtomicBool::new(false)),
         })
     }
     async fn dispatch(&self, request: RpcRequest, headers: &HeaderMap) -> RpcResponse {
@@ -634,6 +668,12 @@ impl AppState {
                 -32000,
                 "Upstream result does not match the selected profile schema",
             ),
+            Err(GatewayError::Upstream(_)) => {
+                // Native responses can echo request material (for example a
+                // signed block). Keep that diagnostic inside the adapter and
+                // expose only the stable public error contract.
+                RpcResponse::err(request.id, -32000, "Upstream request failed")
+            }
             Err(error) => RpcResponse::err(request.id, -32000, error.to_string()),
         }
     }
@@ -745,6 +785,18 @@ fn validate_result(method: &str, result: &Value) -> bool {
 }
 
 pub fn app(state: AppState) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin([
+            HeaderValue::from_static("http://127.0.0.1:8080"),
+            HeaderValue::from_static("http://localhost:8080"),
+            HeaderValue::from_static("https://playground.open-rpc.org"),
+        ])
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            HeaderName::from_static("last-event-id"),
+        ]);
     Router::new()
         .route("/rpc", post(rpc_handler))
         .route("/openrpc.json", get(openrpc_handler))
@@ -752,7 +804,7 @@ pub fn app(state: AppState) -> Router {
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/readyz", get(ready_handler))
         .route("/metrics", get(metrics_handler))
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .layer(ConcurrencyLimitLayer::new(128))
         .layer(TraceLayer::new_for_http())
@@ -781,11 +833,28 @@ async fn metrics_handler(
         format!(
             "nano_gateway_up 1\nnano_gateway_upstream_ready {ready}\n\
 nano_gateway_requests_total {}\nnano_gateway_errors_total {}\n\
-nano_gateway_active_streams {}\nnano_gateway_replay_resets_total {}\n",
+nano_gateway_active_streams {}\nnano_gateway_replay_resets_total {}\n\
+nano_gateway_replay_hits_total {}\nnano_gateway_replay_misses_total {}\n\
+nano_gateway_overflow_resets_total {}\nnano_gateway_upstream_reconnects_total {}\n\
+nano_gateway_sse_queue_capacity {}\n\
+nano_gateway_request_duration_ms_sum {}\nnano_gateway_request_duration_ms_count {}\n",
             state.metrics.requests.load(Ordering::Relaxed),
             state.metrics.errors.load(Ordering::Relaxed),
             state.metrics.active_streams.load(Ordering::Relaxed),
             state.metrics.replay_resets.load(Ordering::Relaxed),
+            state.metrics.replay_hits.load(Ordering::Relaxed),
+            state.metrics.replay_misses.load(Ordering::Relaxed),
+            state.metrics.overflow_resets.load(Ordering::Relaxed),
+            state.metrics.upstream_reconnects.load(Ordering::Relaxed),
+            EVENT_HISTORY_CAPACITY,
+            state
+                .metrics
+                .request_duration_ms_sum
+                .load(Ordering::Relaxed),
+            state
+                .metrics
+                .request_duration_ms_count
+                .load(Ordering::Relaxed),
         ),
     )
 }
@@ -795,6 +864,10 @@ async fn rpc_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Json<RpcResponse> {
+    let _request_metrics = RequestMetricsGuard {
+        metrics: state.metrics.clone(),
+        started: Instant::now(),
+    };
     state.metrics.requests.fetch_add(1, Ordering::Relaxed);
     if body
         .iter()
@@ -857,14 +930,22 @@ struct EventsQuery {
 }
 
 impl EventsQuery {
-    fn account_filter(&self) -> Option<Vec<String>> {
-        self.accounts.as_deref().map(|accounts| {
-            accounts
-                .split(',')
-                .filter(|account| !account.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
+    fn account_filter(&self) -> Result<Option<Vec<String>>, &'static str> {
+        let Some(accounts) = self.accounts.as_deref() else {
+            return Ok(None);
+        };
+        if accounts.len() > MAX_ACCOUNT_FILTER_BYTES {
+            return Err("account filter is too large");
+        }
+        let values = accounts
+            .split(',')
+            .filter(|account| !account.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if values.len() > MAX_ACCOUNT_FILTER_ITEMS {
+            return Err("too many accounts in filter");
+        }
+        Ok(Some(values))
     }
 }
 
@@ -886,11 +967,24 @@ async fn sse_handler(
     headers: HeaderMap,
     axum::extract::Query(query): axum::extract::Query<EventsQuery>,
 ) -> Response {
-    let accounts = query.account_filter();
+    let accounts = match query.account_filter() {
+        Ok(accounts) => accounts,
+        Err(message) => {
+            state.metrics.errors.fetch_add(1, Ordering::Relaxed);
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": message}))).into_response();
+        }
+    };
     let cursor = headers
         .get("last-event-id")
         .and_then(|value| value.to_str().ok());
     let (reset, replay) = state.events.replay(cursor).await;
+    if cursor.is_some() {
+        if reset {
+            state.metrics.replay_misses.fetch_add(1, Ordering::Relaxed);
+        } else {
+            state.metrics.replay_hits.fetch_add(1, Ordering::Relaxed);
+        }
+    }
     state.metrics.active_streams.fetch_add(1, Ordering::Relaxed);
     if reset {
         state.metrics.replay_resets.fetch_add(1, Ordering::Relaxed);
@@ -918,6 +1012,7 @@ async fn sse_handler(
                 Ok(_) => {}
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     replay_resets.fetch_add(1, Ordering::Relaxed);
+                    state.metrics.overflow_resets.fetch_add(1, Ordering::Relaxed);
                     yield Ok::<Event, Infallible>(Event::default()
                         .event("nano.stream_reset")
                         .data("reconnect and reconcile with JSON-RPC"));
@@ -955,6 +1050,12 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
             .await
             .map_err(|e| GatewayError::Upstream(e.to_string()))?;
         connected = true;
+        if state.upstream_seen.swap(true, Ordering::Relaxed) {
+            state
+                .metrics
+                .upstream_reconnects
+                .fetch_add(1, Ordering::Relaxed);
+        }
         state.upstream_ready.store(true, Ordering::Relaxed);
         while let Some(message) = socket.next().await {
             if let Message::Text(text) =
@@ -1215,6 +1316,22 @@ mod tests {
         assert!(url.ends_with("uiSchema%5BappBar%5D%5Bui%3Aedit%5D=false"));
     }
     #[test]
+    fn playground_url_preserves_schema_override_and_host_mode() {
+        let hosted = playground_url(
+            "http://127.0.0.1:8123/rpc",
+            Some("http://127.0.0.1:8123/schema%20snapshot.json"),
+            false,
+        );
+        assert!(hosted.starts_with("https://playground.open-rpc.org/?schemaUrl="));
+        assert!(
+            hosted.contains("schemaUrl=http%3A%2F%2F127.0.0.1%3A8123%2Fschema%2520snapshot.json")
+        );
+        assert!(hosted.ends_with("uiSchema%5BappBar%5D%5Bui%3Aedit%5D=false"));
+
+        let local = playground_url("http://127.0.0.1:8123/rpc", None, true);
+        assert!(local.starts_with("http://127.0.0.1:8080/?schemaUrl="));
+    }
+    #[test]
     fn default_config_keeps_elevated_operations_disabled() {
         let config = Config::default();
         assert!(!config.allow_work && !config.allow_control);
@@ -1389,6 +1506,31 @@ mod tests {
         assert!(events[0].id.contains(':'));
     }
 
+    #[tokio::test]
+    async fn event_hub_exposes_broadcast_lag_and_new_generation() {
+        let first = EventHub::new(1);
+        let mut receiver = first.subscribe();
+        let first_event = first
+            .publish("nano.confirmation", json!({"hash": "a"}))
+            .await;
+        first
+            .publish("nano.confirmation", json!({"hash": "b"}))
+            .await;
+        assert!(matches!(
+            receiver.recv().await,
+            Err(broadcast::error::RecvError::Lagged(_))
+        ));
+
+        let second = EventHub::new(1);
+        let second_event = second
+            .publish("nano.confirmation", json!({"hash": "a"}))
+            .await;
+        assert_ne!(
+            first_event.id.split_once(':').expect("first cursor").0,
+            second_event.id.split_once(':').expect("second cursor").0
+        );
+    }
+
     #[test]
     fn stream_control_events_bypass_account_filters() {
         let item = NanoEvent {
@@ -1514,6 +1656,7 @@ mod tests {
         assert!(run_ws_bridge(state.clone()).await.is_ok());
         assert!(run_ws_bridge(state.clone()).await.is_ok());
         server.await.expect("server task");
+        assert_eq!(state.metrics.upstream_reconnects.load(Ordering::Relaxed), 1);
         let (_, events) = state.events.replay(None).await;
         assert_eq!(events.len(), 2);
         assert!(events
