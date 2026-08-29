@@ -930,24 +930,24 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
     }
     .await;
     state.upstream_ready.store(false, Ordering::Relaxed);
-    if result.is_err() {
-        state
-            .events
-            .publish(
-                "nano.stream_reset",
-                json!({
-                    "reason": "upstream_disconnect",
-                    "profile": state.config.profile,
-                    "reconcile": "Query account_info for affected accounts before applying new confirmations"
-                }),
-            )
-            .await;
-    }
+    state
+        .events
+        .publish(
+            "nano.stream_reset",
+            json!({
+                "reason": if result.is_err() { "upstream_disconnect" } else { "upstream_closed" },
+                "profile": state.config.profile,
+                "reconcile": "Query account_info for affected accounts before applying new confirmations"
+            }),
+        )
+        .await;
     result
 }
 
 fn normalize_confirmation(value: &Value, profile: &str) -> Option<Value> {
-    if value.get("topic").and_then(Value::as_str) != Some("confirmation") {
+    if value.get("ack").is_some()
+        || value.get("topic").and_then(Value::as_str) != Some("confirmation")
+    {
         return None;
     }
     let mut data = value
@@ -1064,6 +1064,7 @@ pub fn playground_url(gateway_url: &str, schema_url: Option<&str>, local: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio_tungstenite::accept_async;
     #[test]
     fn registry_methods_have_unique_names() {
         let methods = registry();
@@ -1341,5 +1342,53 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event, "nano.stream_reset");
         assert_eq!(events[0].data["reason"], "upstream_disconnect");
+    }
+
+    #[tokio::test]
+    async fn websocket_subscription_normalizes_confirmation_and_close() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("websocket listener");
+        let address = listener.local_addr().expect("listener address");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("websocket client");
+            let mut socket = accept_async(stream).await.expect("websocket handshake");
+            let request = socket
+                .next()
+                .await
+                .expect("subscribe frame")
+                .expect("frame");
+            assert!(request
+                .into_text()
+                .expect("subscribe text")
+                .contains("confirmation"));
+            socket
+                .send(Message::Text(
+                    json!({"ack":"subscribe","topic":"confirmation"}).to_string(),
+                ))
+                .await
+                .expect("ack");
+            socket
+                .send(Message::Text(
+                    json!({"topic":"confirmation","message":{"hash":"A","account":"nano_test"}})
+                        .to_string(),
+                ))
+                .await
+                .expect("confirmation");
+            socket.close(None).await.expect("close");
+        });
+        let config = Config {
+            node_ws_url: format!("ws://{address}"),
+            ..Config::default()
+        };
+        let state = AppState::new(config).expect("state");
+        assert!(run_ws_bridge(state.clone()).await.is_ok());
+        server.await.expect("server task");
+        let (_, events) = state.events.replay(None).await;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event, "nano.confirmation");
+        assert_eq!(events[0].data["profile"], "nano-node/V28.2");
+        assert_eq!(events[1].event, "nano.stream_reset");
+        assert_eq!(events[1].data["reason"], "upstream_closed");
     }
 }
