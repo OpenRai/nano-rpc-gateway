@@ -1151,8 +1151,21 @@ mod tests {
         let process: Value =
             serde_json::from_str(include_str!("../fixtures/native/process.success.json"))
                 .expect("process fixture");
+        let unavailable: Value =
+            serde_json::from_str(include_str!("../fixtures/native/upstream_unavailable.json"))
+                .expect("unavailable fixture");
+        let duplicate: Value = serde_json::from_str(include_str!(
+            "../fixtures/native/confirmation.duplicate.json"
+        ))
+        .expect("duplicate fixture");
+        let disconnect: Value =
+            serde_json::from_str(include_str!("../fixtures/native/disconnect.json"))
+                .expect("disconnect fixture");
         assert_eq!(account["action"], "account_info");
         assert_eq!(process["action"], "process");
+        assert_eq!(unavailable["condition"], "connection-refused");
+        assert_eq!(duplicate["delivery"], "duplicate");
+        assert_eq!(disconnect["expected_gateway_event"], "nano.stream_reset");
     }
     #[test]
     fn live_v28_fixture_corpus_is_valid_and_profiled() {

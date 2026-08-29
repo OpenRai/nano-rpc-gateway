@@ -1,0 +1,6 @@
+{
+  "action": "account_info",
+  "condition": "connection-refused",
+  "expected_gateway_error": {"code": -32000, "message_prefix": "upstream:"},
+  "provenance": {"implementation": "nano-node", "version": "V28.2", "kind": "synthetic-example", "status": "NOT TESTED"}
+}
