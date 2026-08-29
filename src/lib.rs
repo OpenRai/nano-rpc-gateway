@@ -290,6 +290,11 @@ pub fn openrpc_document(
             "BlocksInfoResult":{"type":"object","required":["blocks"],"properties":{"blocks":{"type":"object"}}},
             "ProcessParams":{"type":"object","required":["block"],"properties":{"block":{"type":"object"}}}, "ProcessResult":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string"}}},
             "WorkGenerateParams":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string","minLength":1}}}, "WorkGenerateResult":{"type":"object","required":["hash","work","difficulty","multiplier"],"properties":{"hash":{"type":"string"},"work":{"type":"string"},"difficulty":{"type":"string"},"multiplier":{"type":"string"}}}
+        }, "errors": {
+            "InvalidRequest": {"code": -32602, "message": "Invalid method parameters"},
+            "MethodNotFound": {"code": -32601, "message": "Method not found"},
+            "Unauthorized": {"code": -32001, "message": "Unauthorized"},
+            "UpstreamFailure": {"code": -32000, "message": "Upstream request failed"}
         }}, "x-nano-profile": profile
     })
 }
