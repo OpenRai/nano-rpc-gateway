@@ -341,7 +341,13 @@ fn openrpc_method(method: MethodSpec) -> Value {
         "result": {
             "name": "result",
             "schema": {"$ref": format!("#/components/schemas/{}", method.result)}
-        }
+        },
+        "errors": [
+            {"$ref":"#/components/errors/InvalidRequest"},
+            {"$ref":"#/components/errors/MethodNotFound"},
+            {"$ref":"#/components/errors/Unauthorized"},
+            {"$ref":"#/components/errors/UpstreamFailure"}
+        ]
     })
 }
 
