@@ -1,8 +1,10 @@
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use axum::{routing::post, Json, Router};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
+use futures_util::future::join_all;
 use http_body_util::BodyExt;
 use nano_rpc_gateway::{app, generate_signing_key, sign_paseto, AppState, Config};
 use serde_json::{json, Value};
@@ -822,6 +824,100 @@ async fn deterministic_public_flow_covers_discovery_process_confirmation_and_rec
         .contains("event: nano.stream_reset"));
 
     assert!(bridge.await.expect("bridge task").is_ok());
+    ws_task.await.expect("ws task");
+    gateway_task.abort();
+}
+
+#[tokio::test]
+async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
+    let clients = std::env::var("SSE_FANOUT_CLIENTS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| (1..=64).contains(value))
+        .unwrap_or(8);
+
+    let ws_listener = TcpListener::bind("127.0.0.1:0").await.expect("ws bind");
+    let ws_address = ws_listener.local_addr().expect("ws address");
+    let ws_task = tokio::spawn(async move {
+        let (stream, _) = ws_listener.accept().await.expect("ws client");
+        let mut socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("ws handshake");
+        socket.next().await.expect("subscribe frame").expect("subscribe");
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json!({"ack":"subscribe","topic":"confirmation"}).to_string(),
+            ))
+            .await
+            .expect("subscribe ack");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                json!({
+                    "topic":"confirmation",
+                    "message":{"account":"nano_fanout","hash":"FANOUT-HASH"}
+                })
+                .to_string(),
+            ))
+            .await
+            .expect("confirmation");
+        socket.close(None).await.expect("ws close");
+    });
+
+    let native_url = start_native_stub().await;
+    let gateway_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("gateway bind");
+    let gateway_address = gateway_listener.local_addr().expect("gateway address");
+    let mut config = test_config(native_url);
+    config.listen = format!("{gateway_address}");
+    config.node_ws_url = format!("ws://{ws_address}");
+    let state = AppState::new(config).expect("state");
+    let gateway_state = state.clone();
+    let gateway_task = tokio::spawn(async move {
+        axum::serve(gateway_listener, app(gateway_state))
+            .await
+            .expect("gateway server")
+    });
+
+    let client = reqwest::Client::new();
+    let base = format!("http://{gateway_address}");
+    let mut responses = Vec::with_capacity(clients);
+    for _ in 0..clients {
+        let response = client
+            .get(format!("{base}/events/confirmations"))
+            .send()
+            .await
+            .expect("SSE connect");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        responses.push(response);
+    }
+
+    let bridge_state = state.clone();
+    let bridge = tokio::spawn(async move { nano_rpc_gateway::run_ws_bridge(bridge_state).await });
+    let started = Instant::now();
+    let readers = responses.into_iter().map(|mut response| async move {
+        let mut transcript = String::new();
+        loop {
+            let chunk = tokio::time::timeout(std::time::Duration::from_secs(3), response.chunk())
+                .await
+                .expect("SSE timeout")
+                .expect("SSE chunk result")
+                .expect("SSE chunk");
+            transcript.push_str(std::str::from_utf8(&chunk).expect("SSE UTF-8"));
+            if transcript.contains("event: nano.confirmation")
+                && transcript.contains("FANOUT-HASH")
+            {
+                return;
+            }
+        }
+    });
+    join_all(readers).await;
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+    println!("sse_fanout clients={clients} delivered={clients} elapsed_ms={elapsed_ms:.3}");
+
+    assert_eq!(state.metrics.active_streams.load(Ordering::Relaxed), clients as u64);
+    bridge.await.expect("bridge task").expect("bridge result");
     ws_task.await.expect("ws task");
     gateway_task.abort();
 }
