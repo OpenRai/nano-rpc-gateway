@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use axum::{routing::post, Json, Router};
 use base64::Engine;
-use futures_util::{SinkExt, StreamExt};
 use futures_util::future::join_all;
+use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use nano_rpc_gateway::{app, generate_signing_key, sign_paseto, AppState, Config};
 use serde_json::{json, Value};
@@ -843,7 +843,11 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
         let mut socket = tokio_tungstenite::accept_async(stream)
             .await
             .expect("ws handshake");
-        socket.next().await.expect("subscribe frame").expect("subscribe");
+        socket
+            .next()
+            .await
+            .expect("subscribe frame")
+            .expect("subscribe");
         socket
             .send(tokio_tungstenite::tungstenite::Message::Text(
                 json!({"ack":"subscribe","topic":"confirmation"}).to_string(),
@@ -905,8 +909,7 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
                 .expect("SSE chunk result")
                 .expect("SSE chunk");
             transcript.push_str(std::str::from_utf8(&chunk).expect("SSE UTF-8"));
-            if transcript.contains("event: nano.confirmation")
-                && transcript.contains("FANOUT-HASH")
+            if transcript.contains("event: nano.confirmation") && transcript.contains("FANOUT-HASH")
             {
                 return;
             }
@@ -916,7 +919,10 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
     let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
     println!("sse_fanout clients={clients} delivered={clients} elapsed_ms={elapsed_ms:.3}");
 
-    assert_eq!(state.metrics.active_streams.load(Ordering::Relaxed), clients as u64);
+    assert_eq!(
+        state.metrics.active_streams.load(Ordering::Relaxed),
+        clients as u64
+    );
     bridge.await.expect("bridge task").expect("bridge result");
     ws_task.await.expect("ws task");
     gateway_task.abort();
