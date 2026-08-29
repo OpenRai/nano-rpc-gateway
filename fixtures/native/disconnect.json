@@ -1,0 +1,6 @@
+{
+  "topic": "confirmation",
+  "condition": "websocket-disconnect",
+  "expected_gateway_event": "nano.stream_reset",
+  "provenance": {"implementation": "nano-node", "version": "V28.2", "kind": "scenario"}
+}

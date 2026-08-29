@@ -1,12 +1,13 @@
 # Nano RPC Gateway: exploratory software design
 
-Status: working design, not an approved or implemented contract
+Status: working design; the v0.1 sidecar implementation is present, but its
+external contract remains subject to the evidence and compatibility gates below
 
-Last revised: 2026-08-28
+Last revised: 2026-08-29
 
 Primary readers: implementers, integrators, reviewers, and coding agents
 
-Current phase: problem framing and executable-contract design
+Current phase: v0.1 implementation and evidence collection
 
 This document is the source of truth for the current design exploration. Every
 part remains open to refinement when implementation, protocol inspection, or
@@ -109,8 +110,8 @@ false equivalence.
 
 ## 5. Current design position
 
-The current recommendation is a single gateway with two public transports over
-one internal Nano operation and event model.
+The current recommendation is a single gateway with two public interfaces that
+share one internal Nano translation boundary.
 
 ```text
                          Public seam
@@ -126,10 +127,11 @@ one internal Nano operation and event model.
                          Node seam
 ```
 
-The operation and event models form the deep module. They own normalization,
-compatibility rules, error classification, event ordering, overflow signals,
-and reconciliation requirements. Transport adapters remain replaceable and do
-not define Nano semantics.
+The translation boundary turns native Nano HTTP replies and WebSocket messages
+into the gateway's public method results, errors, and events. Both JSON-RPC
+calls and SSE updates use it, so they do not acquire separate meanings for the
+same error, confirmation, overflow, or reconnect. The HTTP-facing adapters can
+change without changing those public meanings.
 
 ## 6. Scope
 
@@ -138,7 +140,7 @@ not define Nano semantics.
 - Run as a separate process or container beside a Nano-compatible node.
 - Connect through configured HTTP RPC, IPC where feasible, and WebSocket URLs.
 - Expose JSON-RPC 2.0 over HTTP.
-- Implement standard `rpc.discover` on the JSON-RPC endpoint.
+- Optionally implement standard `rpc.discover` on the JSON-RPC endpoint.
 - Publish an OpenRPC document derived from reviewed contracts.
 - Expose filtered event streams through SSE.
 - Normalize a small wallet- and integrator-relevant method set.
@@ -199,7 +201,7 @@ A representative request has this shape:
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "nano.account_info",
+  "method": "account_info",
   "params": {
     "account": "nano_..."
   },
@@ -277,13 +279,30 @@ The exact base path remains provisional.
 
 ### 10.2 Method namespace
 
-Gateway methods should use a stable namespace such as `nano.account_info`.
-System methods retain the reserved `rpc.` namespace where a standard defines
-them, including `rpc.discover`.
+The first gateway profile uses native action names at its base endpoint, such
+as `account_info` and `process`. The endpoint and its profile already identify
+the Nano API, so adding `nano.` to every method name is redundant and does not
+improve JSON-RPC compatibility.
 
-Alternative naming, including native action names without a namespace, remains
-open for evidence-based comparison. The selected convention must address method
-collisions and provider extensions.
+System methods retain the reserved `rpc.` namespace where a standard defines
+them, including optional `rpc.discover`.
+
+Potential future evolution, not part of the first implementation, is to split
+the surface into four separately versioned endpoints and schemas:
+
+1. a common integration endpoint for the small set of account, block, and
+   payment operations most applications and client-side wallets use;
+2. a node-state and observability endpoint for statistics, diagnostics, and
+   other operations especially useful to explorers and history trackers;
+3. a custodial-wallet endpoint; and
+4. a proof-of-work endpoint.
+
+This would avoid making ordinary integrations carry a large node-operator
+surface simply because they share the legacy RPC port. `enable_control`-gated
+operations belong in the second, node-state and observability group. Each
+endpoint could retain unprefixed method names. No such endpoint split is part
+of the POC; `control.` remains only a possible explicit boundary if control
+operations ever must share an endpoint with non-control methods.
 
 ### 10.3 Parameter mapping
 
@@ -373,7 +392,9 @@ Batch support is deferred. Before implementation, the project must decide:
 ### 11.1 Standard discovery
 
 The gateway can honestly implement standard `rpc.discover` because its public
-endpoint uses JSON-RPC 2.0.
+endpoint uses JSON-RPC 2.0. It is an optional runtime convenience, not a
+requirement for using the gateway: generated clients can bundle the same
+versioned OpenRPC document at build time.
 
 Illustrative request:
 
@@ -386,8 +407,11 @@ Illustrative request:
 }
 ```
 
-The result returns the gateway's OpenRPC document. Native Nano
-`{"action":"rpc.discover"}` is explicitly not part of this design.
+When enabled, the result returns the gateway's OpenRPC document. Operators may
+disable this method to avoid serving reflection on a performance-sensitive
+deployment; the matching versioned document must still be published with the
+gateway release. Native Nano `{"action":"rpc.discover"}` is explicitly not
+part of this design.
 
 ### 11.2 Document authority
 
@@ -450,6 +474,8 @@ Last-Event-ID: 182736
 Illustrative event:
 
 ```text
+Content-Type: text/event-stream
+
 id: 182737
 event: nano.confirmation
 data: {"account":"nano_...","hash":"...","amount":"..."}
@@ -649,8 +675,12 @@ The gateway should support:
 - a separate container on a private network; and
 - development against remote or hosted endpoints where policy permits it.
 
-The default deployment should keep native node RPC and WebSocket ports private.
-Only the gateway's selected public interfaces should be externally reachable.
+During phase-in, the gateway may run alongside the native node RPC and
+WebSocket endpoints so existing clients remain unaffected. In a hardened
+deployment, an operator may keep those native ports private and expose only
+the gateway's selected public interfaces. This gateway does not change the
+node-to-node P2P protocol; that would require separate protocol and migration
+work.
 
 Configuration should identify exact upstream URLs, credentials, implementation
 profiles, timeouts, body limits, connection limits, and exposed methods. Secret
@@ -781,7 +811,7 @@ Exit evidence: repeatable observations without a public gateway.
 ### Stage 1: One read-only JSON-RPC method
 
 - Implement JSON-RPC parsing and request correlation.
-- Implement `nano.account_info` or another bounded read method.
+- Implement `account_info` or another bounded read method.
 - Preserve raw upstream evidence in test fixtures.
 - Define structured errors for observed failure cases.
 - Publish the first reviewed OpenRPC fragment.
@@ -899,7 +929,8 @@ cite evidence, tests, or a recorded trade-off.
 
 ### Public contract
 
-- Should method names use `nano.account_info` or native `account_info`?
+- What evidence would justify a future endpoint split for node, custodial
+  wallet, proof-of-work, or control operations?
 - Which JSON-RPC version details and OpenRPC tooling interoperate in practice?
 - Should positional `params` be rejected or normalized?
 - Which methods can safely support JSON-RPC notifications?
@@ -981,7 +1012,8 @@ protocol semantics.
 
 ### 26.3 First deployable release
 
-- Native node endpoints can remain private.
+- Existing native clients remain usable during phase-in; hardened deployments
+  may later expose only gateway endpoints.
 - Authentication and method allowlists fail closed.
 - Logs and metrics do not expose secrets or unbounded identifiers.
 - Resource limits cover requests, streams, filters, buffers, and upstream calls.

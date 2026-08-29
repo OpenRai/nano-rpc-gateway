@@ -1,0 +1,6 @@
+{
+  "action": "process",
+  "request": {"block": {"type": "state", "account": "nano_1111111111111111111111111111111111111111111111111111"}},
+  "response": {"hash": "A"},
+  "provenance": {"implementation": "nano-node", "version": "V28.2", "kind": "synthetic-example", "status": "NOT TESTED"}
+}

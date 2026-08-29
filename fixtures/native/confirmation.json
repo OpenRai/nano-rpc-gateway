@@ -1,0 +1,5 @@
+{
+  "topic": "confirmation",
+  "message": {"hash": "A", "account": "nano_1111111111111111111111111111111111111111111111111111", "amount": "0"},
+  "provenance": {"implementation": "nano-node", "version": "V28.2", "kind": "synthetic-example", "status": "NOT TESTED"}
+}

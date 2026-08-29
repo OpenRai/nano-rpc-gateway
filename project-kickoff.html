@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Nano RPC Gateway project kickoff: a bounded, standards-first sidecar for Nano node integrations.">
+    <title>Nano RPC Gateway — Project Kickoff</title>
+    <style>
+      :root {
+        --ink: #07111f;
+        --muted: #66758a;
+        --line: #dce4ed;
+        --paper: #f6f8fb;
+        --card: #ffffff;
+        --blue: #1268ff;
+        --cyan: #00b6d8;
+        --lime: #adf250;
+        --gold: #ffc64d;
+        --coral: #ff6f5e;
+        --shadow: 0 18px 50px rgba(23, 43, 77, .11);
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--paper);
+        font: 16px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      a { color: inherit; text-decoration: none; }
+      a:focus-visible, button:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+      .shell { width: min(1160px, calc(100% - 40px)); margin: 0 auto; }
+      .eyebrow { margin: 0 0 10px; color: var(--blue); font-size: .74rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+      .kicker { color: var(--muted); font-size: .98rem; }
+      .pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid rgba(18,104,255,.18); border-radius: 999px; padding: 6px 10px; color: #174eae; background: rgba(18,104,255,.07); font-size: .78rem; font-weight: 750; }
+      .pill::before { width: 7px; height: 7px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 3px rgba(173,242,80,.25); content: ""; }
+
+      header { color: white; background: var(--ink); overflow: hidden; }
+      .nav { display: flex; justify-content: space-between; align-items: center; min-height: 70px; border-bottom: 1px solid rgba(255,255,255,.13); }
+      .wordmark { display: flex; align-items: center; gap: 10px; font-weight: 850; letter-spacing: -.02em; }
+      .mark { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; color: var(--ink); background: var(--lime); font-size: .7rem; transform: rotate(-8deg); }
+      .nav-links { display: flex; gap: 20px; color: #b7c4d6; font-size: .85rem; }
+      .nav-links a:hover { color: white; }
+      .hero { position: relative; padding: 74px 0 82px; }
+      .hero::after { position: absolute; z-index: 0; top: -210px; right: -190px; width: 620px; height: 620px; border: 1px solid rgba(0,182,216,.35); border-radius: 50%; box-shadow: 0 0 0 65px rgba(18,104,255,.10), 0 0 0 132px rgba(0,182,216,.07); content: ""; }
+      .hero-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 1.35fr .65fr; align-items: end; gap: 60px; }
+      h1 { max-width: 800px; margin: 0; font-size: clamp(2.8rem, 7vw, 5.7rem); line-height: .94; letter-spacing: -.075em; }
+      .hero h1 span { color: var(--lime); }
+      .hero-copy { max-width: 690px; margin: 28px 0 0; color: #c3cddd; font-size: clamp(1.05rem, 2vw, 1.28rem); }
+      .hero-side { padding: 22px; border: 1px solid rgba(255,255,255,.16); border-radius: 16px; background: rgba(255,255,255,.06); backdrop-filter: blur(8px); }
+      .hero-side strong { display: block; margin-bottom: 7px; color: var(--lime); font-size: .78rem; letter-spacing: .1em; text-transform: uppercase; }
+      .hero-side p { margin: 0; color: #dbe3ed; font-size: .95rem; }
+
+      main { padding: 70px 0 95px; }
+      section { margin-top: 92px; }
+      section:first-child { margin-top: 0; }
+      h2 { max-width: 760px; margin: 0; font-size: clamp(2rem, 4vw, 3.1rem); line-height: 1.02; letter-spacing: -.055em; }
+      h3 { margin: 0; font-size: 1rem; letter-spacing: -.02em; }
+      .section-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+      .section-head > p { max-width: 400px; margin: 0; color: var(--muted); }
+
+      .statement { display: grid; grid-template-columns: 1fr 1.05fr; gap: 20px; }
+      .statement > div { min-height: 205px; padding: 31px; border-radius: 18px; }
+      .problem { color: white; background: #21324a; }
+      .problem p { max-width: 430px; margin: 17px 0 0; color: #d7e0eb; font-size: 1.14rem; }
+      .promise { background: var(--lime); }
+      .promise p { max-width: 510px; margin: 17px 0 0; font-size: 1.14rem; }
+      .promise b { text-decoration: underline 3px rgba(7,17,31,.32); text-underline-offset: 3px; }
+
+      .architecture { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); box-shadow: var(--shadow); }
+      .node { position: relative; display: flex; min-height: 158px; flex-direction: column; justify-content: center; padding: 18px; border-radius: 13px; }
+      .node:not(:last-child)::after { position: absolute; top: 50%; right: -16px; width: 31px; height: 1px; background: #aab8ca; content: ""; }
+      .node:not(:last-child)::before { position: absolute; z-index: 1; top: calc(50% - 4px); right: -16px; width: 8px; height: 8px; border-top: 1px solid #aab8ca; border-right: 1px solid #aab8ca; content: ""; transform: rotate(45deg); }
+      .node small { display: block; margin-bottom: 7px; color: var(--muted); font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+      .node strong { font-size: 1.05rem; line-height: 1.15; }
+      .node p { margin: 8px 0 0; color: var(--muted); font-size: .84rem; }
+      .public { background: #e8f1ff; } .core { color: white; background: var(--blue); } .core small, .core p { color: #d7e7ff; } .native { background: #eff9dc; }
+
+      .split { display: grid; grid-template-columns: .92fr 1.08fr; gap: 40px; align-items: start; }
+      .codecard { overflow: hidden; border-radius: 18px; color: #dce7f6; background: #0d1b2d; box-shadow: var(--shadow); }
+      .codebar { display: flex; align-items: center; gap: 7px; height: 44px; padding: 0 16px; border-bottom: 1px solid rgba(255,255,255,.1); color: #9eb0c6; font-size: .78rem; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--coral); } .dot:nth-child(2) { background: var(--gold); } .dot:nth-child(3) { background: var(--lime); }
+      pre { margin: 0; padding: 24px; overflow: auto; font: .83rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .blue { color: #79b6ff; } .green { color: var(--lime); } .orange { color: var(--gold); }
+      .principles { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--line); }
+      .principle { display: grid; grid-template-columns: 38px 1fr; gap: 15px; padding: 17px 20px; background: white; }
+      .principle > span { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; color: white; background: var(--blue); font-size: .73rem; font-weight: 850; }
+      .principle p { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
+
+      .proof { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+      .proof-step { position: relative; min-height: 170px; padding: 19px; border: 1px solid var(--line); border-radius: 15px; background: white; }
+      .proof-step::before { display: grid; width: 27px; height: 27px; place-items: center; margin-bottom: 25px; border-radius: 50%; color: var(--blue); background: #e7f0ff; font-size: .77rem; font-weight: 850; content: attr(data-step); }
+      .proof-step p { margin: 7px 0 0; color: var(--muted); font-size: .86rem; }
+
+      .train { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+      .track { min-height: 260px; padding: 21px; border-radius: 16px; background: white; border: 1px solid var(--line); }
+      .track:first-child { color: white; border-color: var(--blue); background: var(--blue); }
+      .track .id { display: block; margin-bottom: 18px; color: var(--cyan); font: 750 .75rem ui-monospace, monospace; }
+      .track:first-child .id { color: var(--lime); }
+      .track p { margin: 8px 0 16px; color: var(--muted); font-size: .89rem; }
+      .track:first-child p { color: #d9e8ff; }
+      .track ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; color: #40516a; font-size: .8rem; }
+      .track:first-child ul { color: #edf5ff; }
+      .track li::before { margin-right: 7px; color: var(--cyan); content: "→"; }
+      .track:first-child li::before { color: var(--lime); }
+
+      .gates { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+      .gate { padding: 24px; border-radius: 15px; background: white; border-top: 4px solid var(--blue); box-shadow: 0 8px 30px rgba(23,43,77,.06); }
+      .gate:nth-child(2) { border-color: var(--cyan); } .gate:nth-child(3) { border-color: var(--gold); }
+      .gate p { margin: 8px 0 0; color: var(--muted); font-size: .9rem; }
+      .gate strong { display: block; margin-top: 17px; font-size: .78rem; color: #2a65ba; text-transform: uppercase; letter-spacing: .07em; }
+
+      .next { display: grid; grid-template-columns: .8fr 1.2fr; overflow: hidden; border-radius: 20px; color: white; background: var(--ink); }
+      .next-intro { padding: 35px; background: #183355; }
+      .next-intro h2 { font-size: 2.35rem; } .next-intro p { color: #ccdae9; }
+      .next-list { display: grid; align-content: center; gap: 1px; background: rgba(255,255,255,.12); }
+      .next-list div { display: grid; grid-template-columns: 34px 1fr; gap: 13px; padding: 17px 28px; background: var(--ink); }
+      .next-list b { color: var(--lime); } .next-list p { margin: 0; color: #c9d4e2; font-size: .92rem; }
+
+      footer { padding: 30px 0 44px; color: var(--muted); font-size: .8rem; }
+      .footer-line { display: flex; justify-content: space-between; gap: 20px; padding-top: 25px; border-top: 1px solid var(--line); }
+
+      @media (max-width: 900px) {
+        .hero-grid, .statement, .split, .next { grid-template-columns: 1fr; gap: 20px; }
+        .architecture { grid-template-columns: 1fr 1fr; gap: 12px; }
+        .node:not(:last-child)::before, .node:not(:last-child)::after { display: none; }
+        .proof { grid-template-columns: 1fr 1fr; } .train { grid-template-columns: 1fr 1fr; }
+      }
+      @media (max-width: 620px) {
+        .shell { width: min(100% - 28px, 1160px); } .nav-links { display: none; }
+        .hero { padding: 54px 0; } .hero::after { right: -420px; }
+        section { margin-top: 64px; } .section-head { display: block; } .section-head > p { margin-top: 12px; }
+        .architecture, .proof, .train, .gates { grid-template-columns: 1fr; }
+        .proof-step { min-height: auto; } .footer-line { display: block; } .footer-line span + span { display: block; margin-top: 8px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="shell nav">
+        <a class="wordmark" href="#top" aria-label="Nano RPC Gateway kickoff home"><span class="mark">NR</span> Nano RPC Gateway</a>
+        <nav class="nav-links" aria-label="Page sections"><a href="#architecture">Architecture</a><a href="#proof">Proof</a><a href="#train">Delivery train</a><a href="#next">Start here</a></nav>
+      </div>
+      <div class="shell hero" id="top">
+        <div class="hero-grid">
+          <div>
+            <p class="eyebrow" style="color: var(--cyan)">Project kickoff · exploratory sidecar</p>
+            <h1>A Nano RPC <span>gateway.</span></h1>
+            <p class="hero-copy">A gradual path from action-shaped, loosely defined RPC toward versioned JSON-RPC 2.0, machine-checkable schemas, and Server-Sent Events—without breaking existing clients.</p>
+            <p style="margin: 25px 0 0"><span class="pill">POC: evidence-first, not feature-count first</span></p>
+          </div>
+          <aside class="hero-side">
+            <strong>The promise</strong>
+            <p>Semantic equivalence for named node versions and explicit methods—not byte-preserving proxying, assumed parity, or an unbounded public node surface.</p>
+          </aside>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section>
+        <div class="statement">
+          <div class="problem">
+            <p class="eyebrow" style="color: var(--cyan)">The integration problem</p>
+            <h2>Native Nano interfaces work, but make every integrator reconstruct the contract.</h2>
+            <p>Action-shaped HTTP RPC, loosely structured errors, and a separate WebSocket event protocol spread compatibility and recovery logic across every wallet, explorer, exchange, and SDK.</p>
+          </div>
+          <div class="promise">
+            <p class="eyebrow">The technical addition</p>
+            <h2>Add a formal interface <b>without replacing the node.</b></h2>
+            <p>Run a gateway alongside Nano or RsNano. It translates the existing action-based RPC and WebSocket messages into JSON-RPC methods and SSE events, each described by versioned, machine-checkable schemas. Native clients and node P2P remain unaffected.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <div class="section-head">
+          <div><p class="eyebrow">Architecture</p><h2>Translate Nano once, then offer it in two ways.</h2></div>
+          <p>One internal translator turns native Nano RPC replies and WebSocket messages into gateway responses and events. JSON-RPC uses it for calls; SSE uses it for updates, so they do not disagree about an error, confirmation, or reconnect.</p>
+        </div>
+        <div class="architecture" role="img" aria-label="Browser and client flow through JSON-RPC and SSE adapters, gateway operation and event core, Nano HTTP and WebSocket adapters, to a Nano or RsNano node">
+          <div class="node"><small>Integrators</small><strong>Browser · SDK · tool</strong><p>One HTTP-native integration surface.</p></div>
+          <div class="node public"><small>Public seam</small><strong>JSON-RPC 2.0<br>+ SSE</strong><p>Discovery, calls, filtered live events.</p></div>
+          <div class="node core"><small>Gateway core</small><strong>Operation +<br>event model</strong><p>Contract, policy, correlation, reset, backpressure.</p></div>
+          <div class="node native"><small>Node seam</small><strong>Native HTTP RPC<br>+ WebSocket</strong><p>Private, configured upstream interfaces.</p></div>
+          <div class="node"><small>Upstream</small><strong>Nano node<br>or RsNano</strong><p>No required upstream source changes.</p></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="split">
+          <div class="codecard" aria-label="Example JSON-RPC request and SSE event">
+            <div class="codebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left: 6px">public contract</span></div>
+            <pre><span class="blue">POST</span> /rpc
+{
+  <span class="green">"jsonrpc"</span>: <span class="orange">"2.0"</span>,
+  <span class="green">"method"</span>: <span class="orange">"account_info"</span>,
+  <span class="green">"params"</span>: { <span class="green">"account"</span>: <span class="orange">"nano_…"</span> },
+  <span class="green">"id"</span>: 42
+}
+
+<span class="blue">GET</span> /events/confirmations
+Content-Type: text/event-stream
+
+event: nano.confirmation
+id: 7:391
+data: { <span class="green">"hash"</span>: <span class="orange">"…"</span>, <span class="green">"profile"</span>: <span class="orange">"nano-node/V28.2"</span> }</pre>
+          </div>
+          <div class="principles">
+            <div class="principle"><span>01</span><div><h3>Clients can learn the API—or bring one already generated</h3><p>The gateway can publish a machine-readable list of supported calls, inputs, and outputs. Tooling can use it to generate a client; that client can bundle the same information and never ask the server at runtime.</p></div></div>
+            <div class="principle"><span>02</span><div><h3>Live updates with a clear reconnect path</h3><p>While the gateway is running, a reconnecting client can ask for events after its last event ID. If those events are no longer available, the gateway says so and the client queries JSON-RPC for the current state.</p></div></div>
+            <div class="principle"><span>03</span><div><h3>Adopt it without breaking existing clients</h3><p>The gateway can run alongside native RPC and WebSocket endpoints while clients phase over. A hardened deployment may later expose only the gateway; Nano’s node-to-node P2P protocol is a separate concern.</p></div></div>
+            <div class="principle"><span>04</span><div><h3>Compatibility is measured</h3><p>Reports distinguish static inventory, schema validity, and live scenario coverage as PASS, FAIL, or NOT TESTED.</p></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="proof">
+        <div class="section-head">
+          <div><p class="eyebrow">POC finish line</p><h2>Prove one complete flow—not a decorative proxy.</h2></div>
+          <p>Use precomputed work on a deterministic development network so gateway evidence never depends on probabilistic PoW timing.</p>
+        </div>
+        <div class="proof">
+          <div class="proof-step" data-step="1"><h3>Discover</h3><p>A generic client calls <code>rpc.discover</code> and validates the served OpenRPC contract.</p></div>
+          <div class="proof-step" data-step="2"><h3>Read</h3><p>Call <code>account_info</code> through standards-valid JSON-RPC.</p></div>
+          <div class="proof-step" data-step="3"><h3>Submit</h3><p>Publish a valid, precomputed-work state block through <code>process</code>.</p></div>
+          <div class="proof-step" data-step="4"><h3>Observe</h3><p>Receive its normalized confirmation as a browser-compatible SSE event.</p></div>
+          <div class="proof-step" data-step="5"><h3>Recover</h3><p>Reconnect with <code>Last-Event-ID</code>; replay or receive reset and reconcile through RPC.</p></div>
+        </div>
+      </section>
+
+      <section id="train">
+        <div class="section-head">
+          <div><p class="eyebrow">Delivery train · 67 Beads</p><h2>Gradual delivery, with each claim earning its evidence.</h2></div>
+          <p>The first POC unlocks real feedback. Schema, conformance, operations, and upstream work extend it without widening the unproven surface.</p>
+        </div>
+        <div class="train">
+          <article class="track"><span class="id">52b · P1</span><h3>Proof of concept</h3><p>Rust core, versioned evidence, JSON-RPC, OpenRPC, SSE, deterministic integration flow, and baseline security/measurement.</p><ul><li>Profile + fixture corpus</li><li>Runtime contract registry</li><li>Confirmation/recovery semantics</li><li>Public-interface scenario</li></ul></article>
+          <article class="track"><span class="id">lvc · P1</span><h3>Full schema inventory</h3><p>Extract, cross-check, and review release-versioned Nano schemas without treating generated output as public authority.</p><ul><li>Source analysis</li><li>Docs/fixture discrepancy report</li><li>Reusable JSON Schema</li><li>Full OpenRPC profiles</li></ul></article>
+          <article class="track"><span class="id">x2s · P2</span><h3>Controlled profiles</h3><p>Add methods by integration persona and risk class, with explicit write/retry, compute, and provider-extension policy.</p><ul><li>Action classification</li><li>Read-only profile</li><li>Write/idempotency rules</li><li>Work generation limits</li></ul></article>
+          <article class="track"><span class="id">npt · P1</span><h3>Conformance & drift</h3><p>Run shared deterministic scenarios against Nano and RsNano and make differences visible early in CI.</p><ul><li>RsNano profile evidence</li><li>Scenario matrix</li><li>Source/schema/runtime CI</li><li>Compatibility reports</li></ul></article>
+          <article class="track"><span class="id">1pj · P1</span><h3>Production operations</h3><p>Move from POC to an operator-safe sidecar: deployment, policy, limits, proxy behavior, and failure injection.</p><ul><li>Private-upstream deployment</li><li>Auth + rotation</li><li>Overload/restart behavior</li><li>HTTP/3 evaluation</li></ul></article>
+          <article class="track"><span class="id">2z1 · P2</span><h3>Decision gates</h3><p>Keep open questions explicit until measured evidence closes them; no accidental public commitments.</p><ul><li>JSON-RPC feature policy</li><li>Durable replay decision</li><li>Transport decision</li><li>Maintenance ceiling</li></ul></article>
+          <article class="track"><span class="id">qkw · P2</span><h3>Ecosystem & upstream</h3><p>Prove integrator value, publish tested guidance, then prepare an additive standards/upstream proposal.</p><ul><li>Independent consumer</li><li>Operator + developer docs</li><li>ORIS artifact</li><li>Upstream proposal</li></ul></article>
+          <article class="track"><span class="id">fqx · P2</span><h3>Release & sustain</h3><p>Make support claims repeatable: CI, version policy, supply-chain checks, and incident response.</p><ul><li>Reproducible release CI</li><li>Compatibility windows</li><li>Security response</li><li>Release-candidate matrix</li></ul></article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head"><div><p class="eyebrow">Evidence gates</p><h2>What we will refuse to hand-wave.</h2></div></div>
+        <div class="gates">
+          <article class="gate"><h3>Equivalence</h3><p>Only assert it for a named node version, configuration, and method profile with recorded scenarios. The gateway is not a transparent byte proxy.</p><strong>Gate: fixtures + public scenario</strong></article>
+          <article class="gate"><h3>Streaming</h3><p>Never silently drop overflow or imply durable ordering. A stream loss yields a visible control event and a documented state query.</p><strong>Gate: slow client + reset tests</strong></article>
+          <article class="gate"><h3>Efficiency</h3><p>Do not claim low footprint from a language choice. Publish repeatable RSS, startup, RPC, and fan-out measurements with raw artifacts.</p><strong>Gate: benchmark harness + results</strong></article>
+        </div>
+      </section>
+
+      <section id="next">
+        <div class="next">
+          <div class="next-intro"><p class="eyebrow" style="color: var(--cyan)">Begin here</p><h2>First, make the claim small enough to prove.</h2><p>Everything downstream depends on clean upstream evidence and a frozen first compatibility profile.</p></div>
+          <div class="next-list">
+            <div><b>01</b><p><strong>52b.7</strong> — record the POC architecture and public compatibility promise.</p></div>
+            <div><b>02</b><p><strong>52b.1.1</strong> — pin the first Nano node version and deterministic dev-network configuration.</p></div>
+            <div><b>03</b><p><strong>52b.1.2</strong> — capture the real native RPC/WebSocket fixture corpus before implementing translation.</p></div>
+            <div><b>04</b><p><strong>52b.1.3</strong> — make the evidence replayable in a local development network.</p></div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="shell"><div class="footer-line"><span>Nano RPC Gateway · Project Kickoff</span><span>Exploratory, additive infrastructure · Status claims require profile-specific evidence</span></div></footer>
+  </body>
+</html>

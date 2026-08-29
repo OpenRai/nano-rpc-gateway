@@ -1,0 +1,6 @@
+{
+  "action": "account_info",
+  "request": {"account": "nano_1111111111111111111111111111111111111111111111111111"},
+  "response": {"frontier": "A", "open_block": "A", "representative_block": "A", "balance": "0", "modified_timestamp": "0", "block_count": "1"},
+  "provenance": {"implementation": "nano-node", "version": "V28.2", "kind": "synthetic-example", "status": "NOT TESTED"}
+}

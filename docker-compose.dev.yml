@@ -1,0 +1,26 @@
+services:
+  nano:
+    image: nanocurrency/nano:V28.2@sha256:ae5d9421f87c4620c2285479d95e5e79a2084878058934f7ed6a6b96b6add09e
+    restart: unless-stopped
+    volumes:
+      - ./devnet/nano:/root
+    ports:
+      - "127.0.0.1:7076:7076"
+      - "127.0.0.1:7078:7078"
+    networks: [nano-private]
+
+  gateway:
+    build:
+      context: .
+    depends_on: [nano]
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./devnet/gateway.yaml:/etc/nano-rpc-gateway/gateway.yaml:ro
+    networks: [nano-private]
+
+networks:
+  nano-private:
+    # The node needs outbound connectivity to bootstrap. Native RPC and
+    # WebSocket ports remain loopback-only on the host; only these two
+    # development containers share the bridge network.

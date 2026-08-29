@@ -1,0 +1,12 @@
+implementation: nano-node
+release: V28.2
+release_commit: 0d8eea4
+network: dev
+rpc_endpoint: http://[::1]:45000
+websocket_endpoint: ws://[::1]:47000
+confirmation_topic: confirmation
+captured: 2026-08-29
+capture_method: native arm64 release binary from the official V28.2 Darwin artifact
+status: PASS
+fixtures: "HTTP success/error vectors, successful process submission, confirmation subscription acknowledgement, and normalized live confirmation"
+notes: "Captured against an isolated V28.2 development ledger; private keys and wallet secrets are excluded. The process-success vector was generated with native block_create and submitted through the gateway."

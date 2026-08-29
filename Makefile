@@ -1,0 +1,17 @@
+.PHONY: check test clippy playground benchmark devnet-up devnet-smoke devnet-down
+check:
+	cargo check --locked
+test:
+	cargo test --locked
+clippy:
+	cargo clippy --all-targets --all-features --locked -- -D warnings
+playground:
+	cargo run -- playground --gateway-url "$${GATEWAY_URL:-http://127.0.0.1:8090/rpc}" --serve --launch
+benchmark:
+	./scripts/benchmark.sh
+devnet-up:
+	docker compose -f docker-compose.dev.yml up -d --build
+devnet-smoke:
+	./scripts/devnet-smoke.sh
+devnet-down:
+	docker compose -f docker-compose.dev.yml down

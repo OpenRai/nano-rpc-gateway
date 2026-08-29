@@ -1,0 +1,29 @@
+# Operating the v0.1 gateway
+
+The gateway is a sidecar. Keep the Nano node's native HTTP RPC and WebSocket
+listeners on loopback or an isolated network, and expose only the gateway
+listener to integrators.
+
+1. Copy `gateway.yaml.example` to the mounted configuration directory.
+2. Set `node_rpc_url` and `node_ws_url` to the private node listeners.
+3. Leave `allow_work` and `allow_control` disabled unless the corresponding
+   policy and PASETO verification key have been reviewed.
+4. Start `nano-rpc-gateway serve --config /etc/nano-rpc-gateway/gateway.yaml`.
+5. Check `/health`, `/readyz`, and `/metrics` before routing traffic. `/health`
+   is process liveness; `/readyz` returns 200 only after the native
+   confirmation subscription is connected and returns 503 while it is down or
+   reconnecting. The metrics endpoint exposes the same state as
+   `nano_gateway_upstream_ready`.
+
+For TLS, provide both `tls_cert` and `tls_key`. When either is absent the
+development server uses HTTP; terminate TLS at a trusted reverse proxy for
+production if certificate management is external to the sidecar.
+
+`/events/confirmations` is bounded gateway-local replay, not durable storage.
+After `nano.stream_reset`, reconcile state with JSON-RPC before applying new
+events. Rotate PASETO signing keys by replacing the configured verification
+key and issuing short-lived tokens; the gateway stores no token revocation DB.
+
+For a local developer UI, run `make playground`. This serves the pinned stock
+OpenRPC Playground package on loopback:8080 and prints/opens a URL targeting
+the gateway's `/openrpc.json`; it is not included in the gateway image.

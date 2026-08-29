@@ -1,0 +1,16 @@
+implementation: nano-node
+version: V28.2
+status: NOT TESTED
+observed_v0_1_devnet_status: PASS
+observed_v0_1_devnet_date: 2026-08-29
+release_commit: 0d8eea4
+container: nanocurrency/nano:V28.2
+container_digest: sha256:ae5d9421f87c4620c2285479d95e5e79a2084878058934f7ed6a6b96b6add09e
+release_source: https://github.com/nanocurrency/nano-node/releases/tag/V28.2
+compatibility_status_vocabulary: [PASS, FAIL, NOT TESTED, UNSUPPORTED]
+rpc_url: http://127.0.0.1:7076
+websocket_url: ws://127.0.0.1:7078
+confirmation_topic: confirmation
+gateway_profile: nano-node/V28.2
+rsnano_status: NOT TESTED
+provenance: "Official V28.2 release metadata and Docker Registry digest; the v0.1 subset passed on an isolated arm64 Darwin development ledger, while the full profile and Docker image path remain NOT TESTED"

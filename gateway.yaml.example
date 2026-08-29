@@ -1,0 +1,10 @@
+listen: "127.0.0.1:8090"
+node_rpc_url: "http://127.0.0.1:7076"
+node_ws_url: "ws://127.0.0.1:7078"
+profile: "nano-node/V28.2"
+allow_work: false
+allow_control: false
+auth_public_key: null
+enable_discovery: true
+tls_cert: null
+tls_key: null
