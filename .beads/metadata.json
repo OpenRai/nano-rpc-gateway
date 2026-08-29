@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "nano_rpc_gateway",
+  "project_id": "39cf154d-625f-464d-a061-87e5d657e855"
+}
