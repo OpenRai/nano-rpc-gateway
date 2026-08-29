@@ -1216,6 +1216,9 @@ mod tests {
         assert_eq!(manifest["implementation"], "nano-node");
         assert_eq!(manifest["release"], "V28.2");
         assert_eq!(manifest["status"], "PASS");
+        assert_eq!(manifest["confirmation_topic"], "confirmation");
+        assert!(manifest["rpc_endpoint"].as_str().is_some());
+        assert!(manifest["websocket_endpoint"].as_str().is_some());
         for fixture in [
             include_str!("../fixtures/native/v28.2/account_info.request.json"),
             include_str!("../fixtures/native/v28.2/account_info.response.json"),
@@ -1236,6 +1239,20 @@ mod tests {
         ] {
             serde_json::from_str::<Value>(fixture).expect("fixture JSON");
         }
+        let process: Value = serde_json::from_str(include_str!(
+            "../fixtures/native/v28.2/process.success.response.json"
+        ))
+        .expect("process response");
+        assert_eq!(
+            process["hash"],
+            "174C8572181F2C2FB478593214B2B0281DC404406D83924B21ABFBF05B1C0B7E"
+        );
+        let confirmation: Value = serde_json::from_str(include_str!(
+            "../fixtures/native/v28.2/confirmation.live.json"
+        ))
+        .expect("confirmation response");
+        assert_eq!(confirmation["profile"], "nano-node/V28.2");
+        assert!(confirmation["hash"].as_str().is_some());
     }
     #[test]
     fn confirmation_normalization_filters_acks_and_adds_profile() {
