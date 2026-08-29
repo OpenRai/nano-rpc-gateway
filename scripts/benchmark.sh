@@ -4,6 +4,13 @@ set -euo pipefail
 gateway_url="${GATEWAY_URL:-http://127.0.0.1:8090}"
 requests="${REQUESTS:-100}"
 output_file="${OUTPUT_FILE:-}"
+protocol="${PROTOCOL:-http1.1}"
+
+case "$protocol" in
+  http1.1) protocol_args=(--http1.1) ;;
+  http2) protocol_args=(--http2) ;;
+  *) echo "unsupported PROTOCOL=$protocol (expected http1.1 or http2)" >&2; exit 2 ;;
+esac
 
 if [[ -z "$output_file" ]]; then
   output_file="$(mktemp "${TMPDIR:-/tmp}/nano-rpc-gateway-benchmark.XXXXXX")"
@@ -14,13 +21,13 @@ else
 fi
 trap 'if [[ "$cleanup_output" == true ]]; then rm -f "$output_file"; fi' EXIT
 
-printf 'gateway=%s requests=%s raw=%s\n' "$gateway_url" "$requests" "$output_file"
+printf 'gateway=%s protocol=%s requests=%s raw=%s\n' "$gateway_url" "$protocol" "$requests" "$output_file"
 printf 'health: '
-curl --fail --silent --show-error "$gateway_url/health"
+curl "${protocol_args[@]}" --fail --silent --show-error "$gateway_url/health"
 printf '\n'
 
 for _ in $(seq 1 "$requests"); do
-  curl --fail --silent --show-error \
+  curl "${protocol_args[@]}" --fail --silent --show-error \
     -H 'content-type: application/json' \
     -w '%{time_total}\n' \
     --data '{"jsonrpc":"2.0","method":"account_info","params":{"account":"nano_test"},"id":1}' \

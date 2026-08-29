@@ -14,6 +14,6 @@ transport-smoke:
 devnet-up:
 	docker compose -f docker-compose.dev.yml up -d --build
 devnet-smoke:
-	./scripts/devnet-smoke.sh
+	START_DEVNET=1 ./scripts/devnet-smoke.sh
 devnet-down:
 	docker compose -f docker-compose.dev.yml down

@@ -31,5 +31,11 @@ the reproducible request harness is [scripts/benchmark.sh](scripts/benchmark.sh)
 with the first local-only result in [benchmarks/v0.1-loopback.md](benchmarks/v0.1-loopback.md).
 Current compatibility evidence is recorded in [compatibility/v0.1.md](compatibility/v0.1.md).
 
+On a host with Docker, `make devnet-smoke` starts the pinned V28.2 development
+node and gateway, checks the public RPC/OpenRPC/SSE paths, and tears the stack
+down when the smoke run exits. Use `make devnet-up` and
+`./scripts/devnet-smoke.sh` when you need to keep the stack running between
+checks.
+
 Read [DESIGN.md](DESIGN.md) for the complete design, evidence boundaries, open
 questions, and proposed implementation sequence.

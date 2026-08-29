@@ -34,3 +34,9 @@ key and issuing short-lived tokens; the gateway stores no token revocation DB.
 For a local developer UI, run `make playground`. This serves the pinned stock
 OpenRPC Playground package on loopback:8080 and prints/opens a URL targeting
 the gateway's `/openrpc.json`; it is not included in the gateway image.
+
+For a disposable compatibility smoke on a Docker host, run `make devnet-smoke`.
+It starts the pinned V28.2 node and gateway, verifies account lookup, process
+error translation, SSE headers, and native WebSocket readiness, then removes
+the containers. The native node ports are loopback-mapped for development and
+are not the public gateway interface.
