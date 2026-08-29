@@ -192,6 +192,7 @@ pub struct MethodSpec {
     pub params: &'static str,
     pub result: &'static str,
     pub description: &'static str,
+    pub schema_provenance: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,6 +210,7 @@ pub fn registry() -> Vec<MethodSpec> {
             params: "AccountInfoParams",
             result: "AccountInfoResult",
             description: "Read account frontier and representative state.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
             name: "account_balance",
@@ -216,6 +218,7 @@ pub fn registry() -> Vec<MethodSpec> {
             params: "AccountParams",
             result: "AccountBalanceResult",
             description: "Read an account balance.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
             name: "account_history",
@@ -223,6 +226,7 @@ pub fn registry() -> Vec<MethodSpec> {
             params: "AccountHistoryParams",
             result: "AccountHistoryResult",
             description: "Read account history.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
             name: "block_info",
@@ -230,6 +234,7 @@ pub fn registry() -> Vec<MethodSpec> {
             params: "BlockParams",
             result: "BlockInfoResult",
             description: "Read block metadata.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
             name: "blocks_info",
@@ -237,6 +242,7 @@ pub fn registry() -> Vec<MethodSpec> {
             params: "BlocksParams",
             result: "BlocksInfoResult",
             description: "Read metadata for several blocks.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
             name: "process",
@@ -244,6 +250,7 @@ pub fn registry() -> Vec<MethodSpec> {
             params: "ProcessParams",
             result: "ProcessResult",
             description: "Submit a precomputed block to the node.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
             name: "work_generate",
@@ -251,6 +258,7 @@ pub fn registry() -> Vec<MethodSpec> {
             params: "WorkGenerateParams",
             result: "WorkGenerateResult",
             description: "Delegate proof-of-work generation to the node.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
     ]
 }
@@ -336,6 +344,7 @@ fn openrpc_method(method: MethodSpec) -> Value {
     json!({
         "name": method.name,
         "summary": method.description,
+        "x-nano-schema-provenance": method.schema_provenance,
         "paramStructure": "by-name",
         "params": params,
         "result": {
@@ -1121,7 +1130,27 @@ mod tests {
             assert!(method["name"].is_string());
             assert!(method["params"].is_array());
             assert!(method["result"]["schema"].is_object());
+            if method["name"] != "rpc.discover" {
+                assert!(method["x-nano-schema-provenance"].is_string());
+            }
         }
+    }
+
+    #[test]
+    fn registry_and_openrpc_method_inventories_match() {
+        let document =
+            openrpc_document("nano-node/V28.2", true, false, "http://127.0.0.1:7076/rpc");
+        let advertised = document["methods"]
+            .as_array()
+            .expect("methods")
+            .iter()
+            .filter_map(|method| method["name"].as_str())
+            .collect::<Vec<_>>();
+        for spec in registry() {
+            assert!(spec.schema_provenance.starts_with("profiles/"));
+            assert!(advertised.contains(&spec.name));
+        }
+        assert_eq!(advertised.len(), registry().len());
     }
     #[test]
     fn paseto_round_trip_preserves_claims() {
