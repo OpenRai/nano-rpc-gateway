@@ -98,6 +98,19 @@ async fn account_info_translates_native_response() {
 }
 
 #[tokio::test]
+async fn explicit_null_id_is_preserved_as_jsonrpc_null() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let response = rpc(
+        state,
+        r#"{"jsonrpc":"2.0","method":"account_info","params":{"account":"nano_test"},"id":null}"#,
+    )
+    .await;
+    assert!(response["error"].is_null());
+    assert!(response["result"].is_object());
+    assert!(response["id"].is_null());
+}
+
+#[tokio::test]
 async fn malformed_json_returns_jsonrpc_parse_error() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let response = rpc(state, "not-json").await;

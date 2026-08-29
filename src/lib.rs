@@ -139,6 +139,8 @@ pub struct RpcRequest {
     pub method: String,
     #[serde(default)]
     pub params: Option<Value>,
+    #[serde(skip)]
+    pub id_present: bool,
     pub id: Option<Value>,
 }
 
@@ -149,8 +151,7 @@ pub struct RpcResponse {
     pub result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<RpcError>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<Value>,
+    pub id: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,7 +168,7 @@ impl RpcResponse {
             jsonrpc: "2.0".into(),
             result: Some(value),
             error: None,
-            id,
+            id: id.unwrap_or(Value::Null),
         }
     }
     fn err(id: Option<Value>, code: i32, message: impl Into<String>) -> Self {
@@ -179,7 +180,7 @@ impl RpcResponse {
                 message: message.into(),
                 data: None,
             }),
-            id,
+            id: id.unwrap_or(Value::Null),
         }
     }
 }
@@ -559,10 +560,11 @@ impl AppState {
         if request.jsonrpc != "2.0" || request.method.is_empty() {
             return RpcResponse::err(request.id, -32600, "Invalid Request");
         }
-        if request
-            .id
-            .as_ref()
-            .is_none_or(|id| !(id.is_string() || id.is_number() || id.is_null()))
+        if request.id_present
+            && request
+                .id
+                .as_ref()
+                .is_some_and(|id| !(id.is_string() || id.is_number() || id.is_null()))
         {
             return RpcResponse::err(
                 request.id,
@@ -570,7 +572,7 @@ impl AppState {
                 "Invalid Request: id must be string, number, or null",
             );
         }
-        if request.id.is_none() {
+        if !request.id_present {
             return RpcResponse::err(None, -32600, "Notifications are not supported");
         }
         if request.method == "rpc.discover" {
@@ -791,8 +793,8 @@ async fn rpc_handler(
             "Batch requests are not supported",
         ));
     }
-    let request = match serde_json::from_slice::<RpcRequest>(&body) {
-        Ok(request) => request,
+    let value = match serde_json::from_slice::<Value>(&body) {
+        Ok(value) => value,
         Err(error) => {
             state.metrics.errors.fetch_add(1, Ordering::Relaxed);
             return Json(RpcResponse::err(
@@ -802,6 +804,23 @@ async fn rpc_handler(
             ));
         }
     };
+    if !value.is_object() {
+        state.metrics.errors.fetch_add(1, Ordering::Relaxed);
+        return Json(RpcResponse::err(None, -32600, "Invalid Request"));
+    }
+    let id_present = value.get("id").is_some();
+    let mut request = match serde_json::from_value::<RpcRequest>(value) {
+        Ok(request) => request,
+        Err(error) => {
+            state.metrics.errors.fetch_add(1, Ordering::Relaxed);
+            return Json(RpcResponse::err(
+                None,
+                -32600,
+                format!("Invalid Request: {error}"),
+            ));
+        }
+    };
+    request.id_present = id_present;
     let response = state.dispatch(request, &headers).await;
     if response.error.is_some() {
         state.metrics.errors.fetch_add(1, Ordering::Relaxed);
