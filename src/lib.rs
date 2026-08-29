@@ -1407,12 +1407,33 @@ mod tests {
                 .await
                 .expect("ack");
             socket
+                .send(Message::Ping(vec![1, 2, 3]))
+                .await
+                .expect("ping");
+            let pong = tokio::time::timeout(Duration::from_secs(1), socket.next())
+                .await
+                .expect("pong timeout")
+                .expect("pong frame")
+                .expect("pong message");
+            assert!(matches!(pong, Message::Pong(_)));
+            socket
+                .send(Message::Text("not-json".into()))
+                .await
+                .expect("malformed event");
+            socket
                 .send(Message::Text(
                     json!({"topic":"confirmation","message":{"hash":"A","account":"nano_test"}})
                         .to_string(),
                 ))
                 .await
                 .expect("confirmation");
+            socket
+                .send(Message::Text(
+                    json!({"topic":"confirmation","message":{"hash":"A","account":"nano_test"}})
+                        .to_string(),
+                ))
+                .await
+                .expect("duplicate confirmation");
             socket.close(None).await.expect("close");
         });
         let config = Config {
@@ -1428,5 +1449,46 @@ mod tests {
         assert_eq!(events[0].data["profile"], "nano-node/V28.2");
         assert_eq!(events[1].event, "nano.stream_reset");
         assert_eq!(events[1].data["reason"], "upstream_closed");
+    }
+
+    #[tokio::test]
+    async fn websocket_can_reconnect_and_resubscribe() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("websocket listener");
+        let address = listener.local_addr().expect("listener address");
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.expect("websocket client");
+                let mut socket = accept_async(stream).await.expect("websocket handshake");
+                let request = socket
+                    .next()
+                    .await
+                    .expect("subscribe frame")
+                    .expect("frame");
+                assert!(request
+                    .into_text()
+                    .expect("subscribe text")
+                    .contains("confirmation"));
+                socket
+                    .send(Message::Text(json!({"ack":"subscribe"}).to_string()))
+                    .await
+                    .expect("ack");
+                socket.close(None).await.expect("close");
+            }
+        });
+        let config = Config {
+            node_ws_url: format!("ws://{address}"),
+            ..Config::default()
+        };
+        let state = AppState::new(config).expect("state");
+        assert!(run_ws_bridge(state.clone()).await.is_ok());
+        assert!(run_ws_bridge(state.clone()).await.is_ok());
+        server.await.expect("server task");
+        let (_, events) = state.events.replay(None).await;
+        assert_eq!(events.len(), 2);
+        assert!(events
+            .iter()
+            .all(|event| event.event == "nano.stream_reset"));
     }
 }
