@@ -31,15 +31,20 @@ After `nano.stream_reset`, reconcile state with JSON-RPC before applying new
 events. Rotate PASETO signing keys by replacing the configured verification
 key and issuing short-lived tokens; the gateway stores no token revocation DB.
 
-For a local developer UI, run `make playground`. This serves the pinned stock
-OpenRPC Playground package on loopback:8080 and prints/opens a URL targeting
-the gateway's `/openrpc.json`; it is not included in the gateway image.
+For the shortest local developer path, run
+`NANO_RPC_URL=http://127.0.0.1:7076 make gateway-playground`. This builds and
+starts the gateway against the supplied Nano RPC backend, serves the pinned
+stock OpenRPC Playground package on loopback:8080, and prints/opens a URL
+targeting the gateway's `/openrpc.json`; it is not included in the gateway
+image. Run `make playground` when the gateway is already running and only the
+Playground process is needed.
 
 For a disposable compatibility smoke on a Docker host, run `make devnet-smoke`.
-It builds the pinned V28.2 source with `NANO_NETWORK=dev`, starts the node and
-gateway, verifies account lookup, process error translation, SSE headers, and
-native WebSocket readiness, then removes the containers. The native node ports
-are loopback-mapped for development and are not the public gateway interface.
+It pulls the pinned official V28.2 image, starts it with the runtime Dev-network
+selection, starts the gateway, verifies account lookup, process error
+translation, SSE headers, and native WebSocket readiness, then removes the
+containers. The native node ports are loopback-mapped for development and are
+not the public gateway interface.
 
 `make resource-benchmark` measures release-binary startup and idle RSS with
 unreachable upstreams. Treat it as gateway-only data; it says nothing about

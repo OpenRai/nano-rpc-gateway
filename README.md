@@ -21,6 +21,15 @@ RPC port `7076` available). Base reads are unauthenticated, while work
 generation is disabled until a PASETO public key and explicit work policy are
 configured.
 
+For the shortest local path, set the Nano node's native RPC URL and run
+`NANO_RPC_URL=http://127.0.0.1:7076 make gateway-playground`. This builds the
+release gateway, starts it against that backend, serves the pinned stock
+OpenRPC Playground on `127.0.0.1:8080`, prints the preconfigured Playground
+URL, and opens it on macOS. When the node uses a nonstandard WebSocket URL, add
+`NANO_WS_URL=ws://host:port`; the conventional `http(s)://host:7076` URL is
+mapped to `ws(s)://host:7078` automatically. Press Ctrl-C to stop both
+processes. Use `NANO_RPC_URL=... make gateway` when you only want the gateway.
+
 Run `make playground` to serve and open the stock `@open-rpc/playground`
 against the local gateway and schema. Playground is a development companion,
 not part of the gateway process or production image; omit `--serve` to print a
