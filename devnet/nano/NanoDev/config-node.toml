@@ -1,0 +1,10 @@
+# Development-only RPC configuration for docker-compose.dev.yml.
+# The custom image is built with NANO_NETWORK=dev and the entrypoint reads
+# this file from /root/NanoDev.
+[node.websocket]
+address = "::ffff:0.0.0.0"
+port = 7078
+enable = true
+
+[rpc]
+enable = true

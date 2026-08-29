@@ -33,9 +33,10 @@ Current compatibility evidence is recorded in [compatibility/v0.1.md](compatibil
 For gateway-only startup and idle-RSS sampling, use `make resource-benchmark`;
 the measured local result is in [benchmarks/v0.1-resource.md](benchmarks/v0.1-resource.md).
 
-On a host with Docker, `make devnet-smoke` starts the pinned V28.2 development
-node and gateway, checks the public RPC/OpenRPC/SSE paths, and tears the stack
-down when the smoke run exits. Use `make devnet-up` and
+On a host with Docker, `make devnet-smoke` builds the pinned V28.2 source with
+`NANO_NETWORK=dev`, starts the development node and gateway, checks the public
+RPC/OpenRPC/SSE paths, and tears the stack down when the smoke run exits. Use
+`make devnet-up` and
 `./scripts/devnet-smoke.sh` when you need to keep the stack running between
 checks.
 

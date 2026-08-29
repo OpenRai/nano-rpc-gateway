@@ -1,9 +1,0 @@
-# Development-only node configuration for docker-compose.dev.yml.
-# Field names follow Nano's V28 configuration documentation.
-[node.websocket]
-address = "::ffff:0.0.0.0"
-port = 7078
-enable = true
-
-[rpc]
-enable = true
