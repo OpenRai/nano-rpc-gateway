@@ -116,6 +116,20 @@ async fn batch_requests_are_rejected_as_unsupported() {
 }
 
 #[tokio::test]
+async fn oversized_rpc_body_is_rejected_by_gateway_limit() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let body = vec![b'x'; 1024 * 1024 + 1];
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/rpc")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(body))
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    assert_eq!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
 async fn disabled_work_is_rejected_before_upstream_call() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let response = rpc(

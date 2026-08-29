@@ -92,7 +92,9 @@ impl Default for Config {
 impl Config {
     pub fn load(path: &Path) -> Result<Self, GatewayError> {
         match std::fs::read_to_string(path) {
-            Ok(contents) => serde_yaml::from_str(&contents).map_err(GatewayError::Config),
+            Ok(contents) => serde_yaml::from_str::<Self>(&contents)
+                .map_err(GatewayError::Config)
+                .and_then(|config| config.validate()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if let Some(parent) = path
                     .parent()
@@ -105,6 +107,15 @@ impl Config {
             }
             Err(error) => Err(GatewayError::Io(error)),
         }
+    }
+
+    pub fn validate(self) -> Result<Self, GatewayError> {
+        if self.tls_cert.is_some() != self.tls_key.is_some() {
+            return Err(GatewayError::InvalidRequest(
+                "tls_cert and tls_key must be configured together".into(),
+            ));
+        }
+        Ok(self)
     }
 }
 
@@ -507,6 +518,7 @@ fn sse_event(item: NanoEvent) -> Event {
 
 impl AppState {
     pub fn new(config: Config) -> Result<Self, GatewayError> {
+        let config = config.validate()?;
         let verifying_key = config
             .auth_public_key
             .as_deref()
@@ -1121,6 +1133,15 @@ mod tests {
         std::fs::write(&path, "listen: [not-a-string]").expect("write test config");
         assert!(Config::load(&path).is_err());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn partial_tls_configuration_fails_closed() {
+        let config = Config {
+            tls_cert: Some("cert.pem".into()),
+            ..Config::default()
+        };
+        assert!(config.validate().is_err());
     }
     #[test]
     fn native_fixture_examples_are_valid_json() {
