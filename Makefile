@@ -1,4 +1,4 @@
-.PHONY: check test clippy playground benchmark resource-benchmark transport-smoke devnet-up devnet-smoke devnet-down
+.PHONY: check test clippy playground benchmark resource-benchmark container-benchmark transport-smoke devnet-up devnet-smoke devnet-down
 check:
 	cargo check --locked
 test:
@@ -11,6 +11,8 @@ benchmark:
 	./scripts/benchmark.sh
 resource-benchmark:
 	./scripts/resource-benchmark.sh
+container-benchmark:
+	./scripts/container-benchmark.sh
 transport-smoke:
 	./scripts/transport-smoke.sh
 devnet-up:

@@ -32,6 +32,9 @@ with the first local-only result in [benchmarks/v0.1-loopback.md](benchmarks/v0.
 Current compatibility evidence is recorded in [compatibility/v0.1.md](compatibility/v0.1.md).
 For gateway-only startup and idle-RSS sampling, use `make resource-benchmark`;
 the measured local result is in [benchmarks/v0.1-resource.md](benchmarks/v0.1-resource.md).
+On a Docker-capable host, `make container-benchmark` runs the same checks beside
+the pinned dev node and records container memory/CPU plus RPC samples; set
+`BENCHMARK_OUTPUT_FILE` to retain the raw request timings.
 
 On a host with Docker, `make devnet-smoke` builds the pinned V28.2 source with
 `NANO_NETWORK=dev`, starts the development node and gateway, checks the public

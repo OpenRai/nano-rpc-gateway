@@ -5,6 +5,7 @@ gateway_url="${GATEWAY_URL:-http://127.0.0.1:8090}"
 requests="${REQUESTS:-100}"
 output_file="${OUTPUT_FILE:-}"
 protocol="${PROTOCOL:-http1.1}"
+account="${ACCOUNT:-nano_test}"
 tls_args=()
 if [[ "${INSECURE_TLS:-0}" == "1" ]]; then
   tls_args+=(--insecure)
@@ -34,7 +35,7 @@ for _ in $(seq 1 "$requests"); do
   curl "${protocol_args[@]}" "${tls_args[@]}" --fail --silent --show-error \
     -H 'content-type: application/json' \
     -w '%{time_total}\n' \
-    --data '{"jsonrpc":"2.0","method":"account_info","params":{"account":"nano_test"},"id":1}' \
+    --data "$(jq -cn --arg account "$account" '{jsonrpc:"2.0",method:"account_info",params:{account:$account},id:1}')" \
     "$gateway_url/rpc" -o /dev/null >>"$output_file"
 done
 

@@ -44,3 +44,7 @@ are loopback-mapped for development and are not the public gateway interface.
 `make resource-benchmark` measures release-binary startup and idle RSS with
 unreachable upstreams. Treat it as gateway-only data; it says nothing about
 Nano-node memory, container overhead, or SSE event fan-out.
+
+`make container-benchmark` is the Docker-capable counterpart: it builds the
+development stack, waits for gateway readiness, runs the RPC benchmark, and
+prints one `docker stats` sample for the node and gateway before teardown.
