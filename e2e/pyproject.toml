@@ -1,0 +1,36 @@
+[project]
+name = "nano-rpc-gateway-e2e"
+version = "0.1.0"
+description = "Opt-in live E2E tests for the Nano RPC gateway"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.26.0,<0.27.0",
+    "jsonrpc2-pyclient>=5.2.0",
+    "pydantic>=2.12.3",
+    "py-undefined>=0.1.7",
+]
+
+[dependency-groups]
+dev = [
+    "openrpcclientgenerator==0.51.7",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "ruff>=0.13.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+markers = [
+    "live: requires a reachable gateway and Nano RPC upstream",
+    "mutation: submits a live wallet transaction; requires explicit opt-in",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
