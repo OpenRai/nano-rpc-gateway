@@ -1,10 +1,14 @@
 listen: "0.0.0.0:8090"
-node_rpc_url: "http://nano:45000"
-node_ws_url: "ws://nano:47000"
+node_rpc_urls:
+  - "http://nano:45000"
+node_ws_urls:
+  - "ws://nano:47000"
 profile: "nano-node/V28.2"
 allow_work: false
 allow_control: false
 auth_public_key: null
 enable_discovery: true
+enable_inspector: false
+cors_origins: []
 tls_cert: null
 tls_key: null

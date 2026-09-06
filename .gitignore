@@ -7,3 +7,10 @@
 
 # Rust build artifacts
 /target/
+
+# Operator-local configuration and credentials
+/gateway.yaml
+/gateway.local-public.yaml
+/.env
+/.env.*
+!/.env.example

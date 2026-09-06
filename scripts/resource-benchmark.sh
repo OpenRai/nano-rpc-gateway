@@ -27,13 +27,19 @@ fi
 # gateway process' startup and idle footprint, not a Nano node.
 cat >"$config_file" <<EOF
 listen: "127.0.0.1:${listen_port}"
-node_rpc_url: "http://127.0.0.1:9"
-node_ws_url: "ws://127.0.0.1:9"
+node_rpc_urls:
+  - "http://127.0.0.1:9"
+node_ws_urls:
+  - "ws://127.0.0.1:9"
 profile: "nano-node/V28.2"
 allow_work: false
 allow_control: false
 auth_public_key: null
 enable_discovery: true
+enable_inspector: false
+log_rpc: false
+cors_origins:
+  - "http://127.0.0.1:8080"
 EOF
 
 start_ns="$(date +%s%N)"

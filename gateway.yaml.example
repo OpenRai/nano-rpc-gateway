@@ -1,10 +1,26 @@
 listen: "127.0.0.1:8090"
-node_rpc_url: "http://127.0.0.1:7076"
-node_ws_url: "ws://127.0.0.1:7078"
+node_rpc_urls:
+  - "http://127.0.0.1:7076"
+node_ws_urls:
+  - "ws://127.0.0.1:7078"
+# Public provider examples (set variables in the local .env; do not commit secrets):
+# node_rpc_urls:
+#   - "https://${NANO_TO_API_KEY}:@rpc.nano.to/"
+#   - "https://nodes.nanswap.com/XNO?api_key=${NANSWAP_COM_API_KEY}"
+# node_ws_urls:
+#   - "wss://nodes.nanswap.com/ws/?ticker=XNO&api_key=${NANSWAP_COM_API_KEY}"
+#   - "wss://ws.nano.to"
 profile: "nano-node/V28.2"
+require_common_auth: true
 allow_work: false
 allow_control: false
 auth_public_key: null
 enable_discovery: true
+enable_inspector: false
+log_rpc: false
+cors_origins:
+  - "http://127.0.0.1:8080"
+  - "http://localhost:8080"
+  - "https://playground.open-rpc.org"
 tls_cert: null
 tls_key: null
