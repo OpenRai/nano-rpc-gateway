@@ -8,7 +8,7 @@
           "bindingVersion": "0.3.0"
         }
       },
-      "description": "Bounded process-local replay. Send Last-Event-ID to resume; nano.stream_reset reports that replay or live continuity is unavailable.",
+      "description": "Bounded process-local replay. Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose destination is a tracked account. For a send, params.hash equals the process result hash. Send Last-Event-ID to resume; deduplicate by hash. nano.stream_reset reports that replay or live continuity is unavailable; call block_info with each tracked hash and inspect result.confirmed.",
       "messages": {
         "nanoConfirmation": {
           "$ref": "#/components/messages/nano.confirmation"
@@ -35,9 +35,17 @@
               "jsonrpc": "2.0",
               "method": "nano.confirmation",
               "params": {
-                "account": "nano_...",
+                "account": "nano_sender...",
+                "block": {
+                  "link_as_account": "nano_new_account...",
+                  "subtype": "send",
+                  "type": "state"
+                },
+                "confirmation_type": "active_quorum",
+                "destination": "nano_new_account...",
                 "hash": "ABC123",
-                "profile": "nano-node/V28.2"
+                "profile": "nano-node/V28.2",
+                "subtype": "send"
               }
             }
           }
@@ -63,7 +71,7 @@
           ],
           "type": "object"
         },
-        "summary": "A block confirmation observed from the configured Nano profile.",
+        "summary": "A cemented block confirmation observed from the configured Nano profile.",
         "title": "nano.confirmation"
       },
       "nano.stream_reset": {
@@ -111,6 +119,7 @@
         "additionalProperties": true,
         "properties": {
           "account": {
+            "description": "Confirmed block account.",
             "type": "string"
           },
           "amount": {
@@ -118,12 +127,14 @@
           },
           "block": {
             "additionalProperties": true,
+            "description": "Native confirmed block content when supplied by the upstream node.",
             "type": "object"
           },
           "confirmation_type": {
             "type": "string"
           },
           "destination": {
+            "description": "Recipient of a state send when present; an accounts-filtered subscriber receives matching destination events.",
             "type": "string"
           },
           "election_info": {
@@ -131,9 +142,14 @@
             "type": "object"
           },
           "hash": {
+            "description": "Cemented block hash. For a submitted block, this equals process result.hash and is the idempotency key.",
             "type": "string"
           },
           "profile": {
+            "type": "string"
+          },
+          "subtype": {
+            "description": "Native state block subtype, such as send or receive, when supplied by the upstream node.",
             "type": "string"
           }
         },
@@ -175,7 +191,7 @@
   },
   "defaultContentType": "application/json",
   "info": {
-    "description": "Receive-only SSE notifications for a pinned Nano node profile. A reset means consumers must reconcile authoritative state with Nano RPC before applying later confirmations.",
+    "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if a reset occurs or confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state.",
     "title": "Nano Gateway Events",
     "version": "0.1.0"
   },
@@ -189,7 +205,7 @@
           "query": {
             "properties": {
               "accounts": {
-                "description": "Comma-separated account filter matching the confirmed block account or destination; nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied.",
+                "description": "Comma-separated account filter. A match is a confirmed block owned by a tracked account (send or receive), or a state send addressed to a tracked account. nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied.",
                 "type": "string"
               },
               "hashes": {
@@ -204,7 +220,7 @@
       "channel": {
         "$ref": "#/channels/confirmations"
       },
-      "summary": "Receive Nano confirmation and stream reset notifications."
+      "summary": "Receive cemented Nano account confirmations and stream reset notifications."
     }
   },
   "servers": {
@@ -222,6 +238,43 @@
         "type": "string"
       }
     }
+  },
+  "x-nano-account-tracking": {
+    "accounts_filter": "Subscribe with the watched accounts before any related process call.",
+    "not_provided": [
+      "balance aggregation",
+      "derived balance events",
+      "vote events",
+      "telemetry events"
+    ],
+    "state_refresh": {
+      "method": "accounts_balances",
+      "params": {
+        "accounts": "the watched accounts",
+        "include_only_confirmed": true
+      },
+      "result": {
+        "balances": "per-account balance and receivable values"
+      },
+      "when": "Seed state once, then refresh in one batch after a matching confirmation or stream reset; do not poll."
+    }
+  },
+  "x-nano-confirmation-tracking": {
+    "correlation": {
+      "confirmation_hash": "params.hash",
+      "idempotency_key": "params.hash",
+      "process_method": "process",
+      "process_result_hash": "result.hash"
+    },
+    "fallback": {
+      "confirmed_field": "result.confirmed",
+      "method": "block_info",
+      "params": {
+        "hash": "process result hash"
+      },
+      "suggested_delay_seconds": 5
+    },
+    "subscribe_before_process": true
   },
   "x-nano-profile": "nano-node/V28.2"
 }

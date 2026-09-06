@@ -7,10 +7,20 @@ const siteDir = path.join(docsDir, 'api-docs')
 const openrpc = JSON.parse(fs.readFileSync(path.join(siteDir, 'openrpc.json')))
 const asyncapi = JSON.parse(fs.readFileSync(path.join(siteDir, 'asyncapi.json')))
 
+function exampleValue(parameter) {
+  if (parameter.schema?.type === 'array') {
+    const item = parameter.name === 'accounts' ? 'account'
+      : parameter.name === 'hashes' ? 'hash'
+        : parameter.name
+    return [`<${item}>`]
+  }
+  return `<${parameter.name}>`
+}
+
 const rpc = openrpc.methods.map(method => ({
   kind: 'rpc', name: method.name, summary: method.summary,
   href: `#rpc-${method.name.replaceAll('.', '-')}`,
-  example: JSON.stringify({ jsonrpc: '2.0', method: method.name, params: Object.fromEntries(method.params.filter(p => p.required).map(p => [p.name, `<${p.name}>`])), id: 1 }, null, 2)
+  example: JSON.stringify({ jsonrpc: '2.0', method: method.name, params: Object.fromEntries(method.params.filter(p => p.required).map(p => [p.name, exampleValue(p)])), id: 1 }, null, 2)
 }))
 const events = Object.values(asyncapi.components.messages).map(message => ({
   kind: 'event', name: message.name, summary: message.summary,

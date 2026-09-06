@@ -7,8 +7,8 @@ dump of every native Nano action.
 
 | Disposition | Gateway behavior |
 | --- | --- |
-| Supported | `version`, `block_count`, `account_info`, `receivable`, `account_balance`, `account_history`, `block_info`, `blocks_info`, `process`, and `rpc.discover` when discovery is enabled. |
-| Rejected | Batch requests, unknown methods, deprecated aliases, and methods outside the published profile return the standard JSON-RPC method/parameter error. |
+| Supported | `version`, `block_count`, `account_info`, `receivable`, `account_balance`, `accounts_balances`, `account_history`, `block_info`, `blocks_info`, `process`, and `rpc.discover` when discovery is enabled. `accounts_balances` is the native per-account batch response; the gateway does not aggregate it. |
+| Rejected | JSON-RPC request batches, unknown methods, deprecated aliases, and methods outside the published profile return the standard JSON-RPC method/parameter error. |
 | Deferred | Control, custodial-wallet, and threshold-discovery operations are not part of this profile and are not advertised or routed. |
 
 The conformance suite checks both the positive method inventory and negative

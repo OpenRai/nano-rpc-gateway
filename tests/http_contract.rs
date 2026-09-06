@@ -27,6 +27,9 @@ async fn start_native_stub() -> String {
                     "confirmed_balance":"0", "confirmed_height":"1"
                 }),
                 Some("account_balance") => json!({"balance":"0", "pending":"0"}),
+                Some("accounts_balances") => json!({"balances": {
+                    "nano_test": {"balance":"0", "pending":"0"}
+                }}),
                 Some("pending") => json!([]),
                 Some("account_history") => json!({"account":"nano_test", "history": []}),
                 Some("block_info") => json!({"block_account":"nano_test", "amount":"0", "balance":"0", "height":"1", "contents":"{\"type\":\"state\"}"}),
@@ -165,6 +168,11 @@ async fn base_profile_matrix_translates_all_public_methods() {
     let cases = [
         ("account_info", json!({"account":"nano_test"}), "frontier"),
         ("account_balance", json!({"account":"nano_test"}), "balance"),
+        (
+            "accounts_balances",
+            json!({"accounts":["nano_test"], "include_only_confirmed":true}),
+            "balances",
+        ),
         ("receivable", json!({"account":"nano_test"}), "result"),
         (
             "account_history",
@@ -199,11 +207,73 @@ async fn base_profile_matrix_translates_all_public_methods() {
     .await;
     assert_eq!(invalid_history["error"]["code"], -32602);
     let invalid_blocks = rpc(
-        state,
+        state.clone(),
         r#"{"jsonrpc":"2.0","method":"blocks_info","params":{"hashes":[]},"id":8}"#,
     )
     .await;
     assert_eq!(invalid_blocks["error"]["code"], -32602);
+    let invalid_accounts = rpc(
+        state,
+        r#"{"jsonrpc":"2.0","method":"accounts_balances","params":{"accounts":[]},"id":9}"#,
+    )
+    .await;
+    assert_eq!(invalid_accounts["error"]["code"], -32602);
+}
+
+#[tokio::test]
+async fn accounts_balances_forwards_a_24_account_native_batch_without_aggregation() {
+    let router = Router::new().route(
+        "/",
+        post(|Json(body): Json<Value>| async move {
+            assert_eq!(body["action"], "accounts_balances");
+            assert_eq!(body["include_only_confirmed"], true);
+            let accounts = body["accounts"].as_array().expect("accounts array");
+            assert_eq!(accounts.len(), 24);
+            let balances = accounts
+                .iter()
+                .enumerate()
+                .map(|(index, account)| {
+                    (
+                        account.as_str().expect("account string").to_owned(),
+                        json!({
+                            "balance": (index + 100).to_string(),
+                            "pending": (index + 200).to_string()
+                        }),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>();
+            Json(json!({"balances": balances}))
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind stub");
+    let address = listener.local_addr().expect("stub address");
+    tokio::spawn(async move { axum::serve(listener, router).await.expect("stub server") });
+
+    let watched_accounts = (0..24)
+        .map(|index| format!("nano_watched_{index:02}"))
+        .collect::<Vec<_>>();
+    let state = AppState::new(test_config(format!("http://{address}"))).expect("state");
+    let response = rpc(
+        state,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "accounts_balances",
+            "params": {"accounts": watched_accounts, "include_only_confirmed": true},
+            "id": 1
+        })
+        .to_string(),
+    )
+    .await;
+    let balances = response["result"]["balances"]
+        .as_object()
+        .expect("balances result");
+    assert_eq!(balances.len(), 24);
+    assert_eq!(balances["nano_watched_00"]["balance"], "100");
+    assert_eq!(balances["nano_watched_00"]["receivable"], "200");
+    assert_eq!(balances["nano_watched_23"]["balance"], "123");
+    assert_eq!(balances["nano_watched_23"]["receivable"], "223");
+    assert!(response["result"].get("balance").is_none());
+    assert!(!response["result"].to_string().contains("pending"));
 }
 
 #[tokio::test]
@@ -929,7 +999,7 @@ async fn confirmation_stream_releases_active_stream_metric_when_cancelled() {
 }
 
 #[tokio::test]
-async fn deterministic_public_flow_covers_discovery_process_confirmation_and_reconcile() {
+async fn deterministic_public_flow_subscribes_before_process_and_refreshes_account_state() {
     let native_router = Router::new().route(
         "/",
         post(|Json(body): Json<Value>| async move {
@@ -945,6 +1015,9 @@ async fn deterministic_public_flow_covers_discovery_process_confirmation_and_rec
                     json!({"error":"invalid block"})
                 }
                 Some("process") => json!({"hash":"FLOW-HASH"}),
+                Some("accounts_balances") => json!({"balances": {
+                    "nano_recipient": {"balance":"7", "receivable":"3"}
+                }}),
                 _ => json!({"error":"unsupported"}),
             };
             Json(response)
@@ -960,6 +1033,7 @@ async fn deterministic_public_flow_covers_discovery_process_confirmation_and_rec
 
     let ws_listener = TcpListener::bind("127.0.0.1:0").await.expect("ws bind");
     let ws_address = ws_listener.local_addr().expect("ws address");
+    let (send_confirmation, receive_confirmation) = tokio::sync::oneshot::channel();
     let ws_task = tokio::spawn(async move {
         let (stream, _) = ws_listener.accept().await.expect("ws client");
         let mut socket = tokio_tungstenite::accept_async(stream)
@@ -979,11 +1053,21 @@ async fn deterministic_public_flow_covers_discovery_process_confirmation_and_rec
             ))
             .await
             .expect("subscribe ack");
+        receive_confirmation.await.expect("confirmation trigger");
         socket
             .send(tokio_tungstenite::tungstenite::Message::Text(
                 json!({
                     "topic":"confirmation",
-                    "message":{"account":"nano_flow","hash":"FLOW-HASH"}
+                    "message":{
+                        "account":"nano_sender",
+                        "hash":"FLOW-HASH",
+                        "block":{
+                            "type":"state",
+                            "subtype":"send",
+                            "balance":"90",
+                            "link_as_account":"nano_recipient"
+                        }
+                    }
                 })
                 .to_string(),
             ))
@@ -1031,7 +1115,9 @@ async fn deterministic_public_flow_covers_discovery_process_confirmation_and_rec
     let client = reqwest::Client::new();
     let base = format!("http://{gateway_address}");
     let mut sse_response = client
-        .get(format!("{base}/events/confirmations"))
+        .get(format!(
+            "{base}/events/confirmations?accounts=nano_recipient"
+        ))
         .send()
         .await
         .expect("SSE connect");
@@ -1082,6 +1168,9 @@ async fn deterministic_public_flow_covers_discovery_process_confirmation_and_rec
         .await
         .expect("process JSON");
     assert_eq!(process["result"]["hash"], "FLOW-HASH");
+    send_confirmation
+        .send(())
+        .expect("emit confirmation after process");
     let rejected: Value = client
         .post(format!("{base}/rpc"))
         .bearer_auth(sign_paseto(
@@ -1117,7 +1206,30 @@ async fn deterministic_public_flow_covers_discovery_process_confirmation_and_rec
     }
     assert!(transcript.contains("event: nano.confirmation"));
     assert!(transcript.contains("FLOW-HASH"));
+    assert!(transcript.contains("nano_recipient"));
+    assert!(transcript.contains("\"subtype\":\"send\""));
     assert!(transcript.contains("event: nano.stream_reset"));
+
+    let refreshed: Value = client
+        .post(format!("{base}/rpc"))
+        .json(&json!({
+            "jsonrpc":"2.0", "method":"accounts_balances",
+            "params":{"accounts":["nano_recipient"], "include_only_confirmed":true}, "id":5
+        }))
+        .send()
+        .await
+        .expect("accounts balance refresh")
+        .json()
+        .await
+        .expect("accounts balance refresh JSON");
+    assert_eq!(
+        refreshed["result"]["balances"]["nano_recipient"]["balance"],
+        "7"
+    );
+    assert_eq!(
+        refreshed["result"]["balances"]["nano_recipient"]["receivable"],
+        "3"
+    );
     let confirmation_id = transcript
         .split("\n\n")
         .find(|frame| frame.contains("event: nano.confirmation"))

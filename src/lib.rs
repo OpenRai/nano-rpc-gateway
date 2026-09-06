@@ -407,6 +407,14 @@ pub fn registry() -> Vec<MethodSpec> {
             schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
+            name: "accounts_balances",
+            scope: Scope::Base,
+            params: "AccountsParams",
+            result: "AccountsBalancesResult",
+            description: "Read balances and receivables for several accounts.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
+        },
+        MethodSpec {
             name: "account_history",
             scope: Scope::Base,
             params: "AccountHistoryParams",
@@ -419,7 +427,7 @@ pub fn registry() -> Vec<MethodSpec> {
             scope: Scope::Base,
             params: "BlockParams",
             result: "BlockInfoResult",
-            description: "Read block metadata.",
+            description: "Read block metadata and cementing status for confirmation fallback.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
@@ -435,7 +443,8 @@ pub fn registry() -> Vec<MethodSpec> {
             scope: Scope::Common,
             params: "ProcessParams",
             result: "ProcessResult",
-            description: "Submit a precomputed block to the node.",
+            description:
+                "Submit a precomputed block and return its hash for confirmation correlation.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
@@ -511,7 +520,7 @@ fn event_registry() -> [EventSpec; 2] {
     [
         EventSpec {
             name: "nano.confirmation",
-            summary: "A block confirmation observed from the configured Nano profile.",
+            summary: "A cemented block confirmation observed from the configured Nano profile.",
             params_schema: "ConfirmationParams",
         },
         EventSpec {
@@ -556,7 +565,7 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
         "info": {
             "title": "Nano Gateway Events",
             "version": "0.1.0",
-            "description": "Receive-only SSE notifications for a pinned Nano node profile. A reset means consumers must reconcile authoritative state with Nano RPC before applying later confirmations."
+            "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if a reset occurs or confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state."
         },
         "defaultContentType": "application/json",
         "servers": {"gateway": {"host": host, "protocol": protocol, "pathname": "/events/confirmations"}},
@@ -564,7 +573,7 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
             "confirmations": {
                 "address": "/events/confirmations",
                 "title": "Confirmation event stream",
-                "description": "Bounded process-local replay. Send Last-Event-ID to resume; nano.stream_reset reports that replay or live continuity is unavailable.",
+                "description": "Bounded process-local replay. Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose destination is a tracked account. For a send, params.hash equals the process result hash. Send Last-Event-ID to resume; deduplicate by hash. nano.stream_reset reports that replay or live continuity is unavailable; call block_info with each tracked hash and inspect result.confirmed.",
                 "servers": [{"$ref": "#/servers/gateway"}],
                 "messages": {
                     "nanoConfirmation": {"$ref": "#/components/messages/nano.confirmation"},
@@ -576,12 +585,12 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
         "operations": {
             "receiveConfirmations": {
                 "action": "receive",
-                "summary": "Receive Nano confirmation and stream reset notifications.",
+                "summary": "Receive cemented Nano account confirmations and stream reset notifications.",
                 "channel": {"$ref": "#/channels/confirmations"},
                 "bindings": {"http": {
                     "method": "GET",
                     "query": {"type": "object", "properties": {
-                        "accounts": {"type": "string", "description": "Comma-separated account filter matching the confirmed block account or destination; nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied."},
+                        "accounts": {"type": "string", "description": "Comma-separated account filter. A match is a confirmed block owned by a tracked account (send or receive), or a state send addressed to a tracked account. nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied."},
                         "hashes": {"type": "string", "description": "Comma-separated block hash filter."}
                     }},
                     "bindingVersion": "0.3.0"
@@ -596,6 +605,31 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
             }
         },
         "x-nano-profile": profile,
+        "x-nano-confirmation-tracking": {
+            "subscribe_before_process": true,
+            "correlation": {
+                "process_method": "process",
+                "process_result_hash": "result.hash",
+                "confirmation_hash": "params.hash",
+                "idempotency_key": "params.hash"
+            },
+            "fallback": {
+                "method": "block_info",
+                "params": {"hash": "process result hash"},
+                "confirmed_field": "result.confirmed",
+                "suggested_delay_seconds": 5
+            }
+        },
+        "x-nano-account-tracking": {
+            "accounts_filter": "Subscribe with the watched accounts before any related process call.",
+            "state_refresh": {
+                "method": "accounts_balances",
+                "params": {"accounts": "the watched accounts", "include_only_confirmed": true},
+                "result": {"balances": "per-account balance and receivable values"},
+                "when": "Seed state once, then refresh in one batch after a matching confirmation or stream reset; do not poll."
+            },
+            "not_provided": ["balance aggregation", "derived balance events", "vote events", "telemetry events"]
+        },
         "x-http-response": {
             "contentType": "text/event-stream",
             "headers": {"Last-Event-ID": {"type": "string", "description": "Resume after this SSE event cursor."}}
@@ -618,10 +652,13 @@ fn confirmation_params_schema() -> Value {
     json!({
         "type": "object", "required": ["profile", "hash"],
         "properties": {
-            "profile": {"type": "string"}, "hash": {"type": "string"},
-            "account": {"type": "string"}, "destination": {"type": "string"},
+            "profile": {"type": "string"},
+            "hash": {"type": "string", "description": "Cemented block hash. For a submitted block, this equals process result.hash and is the idempotency key."},
+            "account": {"type": "string", "description": "Confirmed block account."},
+            "destination": {"type": "string", "description": "Recipient of a state send when present; an accounts-filtered subscriber receives matching destination events."},
+            "subtype": {"type": "string", "description": "Native state block subtype, such as send or receive, when supplied by the upstream node."},
             "amount": {"type": "string"}, "confirmation_type": {"type": "string"},
-            "block": {"type": "object", "additionalProperties": true},
+            "block": {"type": "object", "description": "Native confirmed block content when supplied by the upstream node.", "additionalProperties": true},
             "election_info": {"type": "object", "additionalProperties": true}
         }, "additionalProperties": true
     })
@@ -642,7 +679,15 @@ fn notification_example(method: &str, profile: &str) -> Value {
     match method {
         "nano.confirmation" => notification(
             method,
-            json!({"profile": profile, "hash": "ABC123", "account": "nano_..."}),
+            json!({
+                "profile": profile,
+                "hash": "ABC123",
+                "account": "nano_sender...",
+                "destination": "nano_new_account...",
+                "subtype": "send",
+                "confirmation_type": "active_quorum",
+                "block": {"type": "state", "subtype": "send", "link_as_account": "nano_new_account..."}
+            }),
         ),
         _ => notification(method, reset_params("replay_unavailable", profile)),
     }
@@ -682,10 +727,12 @@ fn build_openrpc_document(
         "components": {"schemas": {
             "AccountParams":{"type":"object","required":["account"],"properties":{"account":{"type":"string","minLength":1}}},
             "AccountInfoParams":{"$ref":"#/components/schemas/AccountParams"},
+            "AccountsParams":{"type":"object","required":["accounts"],"properties":{"accounts":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},"include_only_confirmed":{"type":"boolean","default":true}}},
             "EmptyParams":{"type":"object","properties":{},"additionalProperties":false},
             "VersionResult":{"type":"object","required":["rpc_version"],"properties":{"rpc_version":{"type":"string"}}},
             "BlockCountResult":{"type":"object","required":["count","unchecked","cemented"],"properties":{"count":{"type":"string"},"unchecked":{"type":"string"},"cemented":{"type":"string"}}},
             "AccountBalanceResult":{"type":"object","required":["balance","receivable"],"properties":{"balance":{"type":"string"},"receivable":{"type":"string"}}},
+            "AccountsBalancesResult":{"type":"object","required":["balances"],"properties":{"balances":{"type":"object","additionalProperties":{"$ref":"#/components/schemas/AccountBalanceResult"}},"errors":{"type":"object","additionalProperties":{"type":"string"}}}},
             "AccountHistoryResult":{"type":"object","required":["account","history"],"properties":{"account":{"type":"string"},"history":{"type":"array","items":true}}},
             "AccountInfoResult":{"type":"object","required":["opened","frontier","open_block","representative_block","balance","confirmed_frontier","confirmed_balance","confirmation_height","confirmation_height_frontier"],"properties":{"opened":{"type":"boolean"},"frontier":{"oneOf":[{"type":"string"},{"type":"null"}]},"open_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"representative_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"balance":{"type":"string"},"confirmed_frontier":{"oneOf":[{"type":"string"},{"type":"null"}]},"confirmed_balance":{"type":"string"},"confirmation_height":{"type":"string"},"confirmation_height_frontier":{"oneOf":[{"type":"string"},{"type":"null"}]}}},
             "ReceivableEntry":{"type":"object","required":["source","hash","amount"],"properties":{"source":{"type":"string"},"hash":{"type":"string"},"amount":{"type":"string"}}},
@@ -715,6 +762,10 @@ fn openrpc_method(method: MethodSpec) -> Value {
             "required": true,
             "schema": {"type": "string"}
         })],
+        "accounts_balances" => vec![
+            json!({"name": "accounts", "required": true, "schema": {"type": "array", "minItems": 1, "items": {"type": "string"}}}),
+            json!({"name": "include_only_confirmed", "required": false, "schema": {"type": "boolean", "default": true}}),
+        ],
         "account_history" => vec![
             json!({"name": "account", "required": true, "schema": {"type": "string"}}),
             json!({"name": "count", "required": false, "schema": {"type": "integer"}}),
@@ -1530,8 +1581,9 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
         .ok_or_else(|| "params must be an object".to_string())?;
     let required = match method {
         "account_info" | "receivable" | "account_balance" | "account_history" => "account",
-        "block_info" => "hash",
+        "accounts_balances" => "accounts",
         "blocks_info" => "hashes",
+        "block_info" => "hash",
         "process" => "block",
         "work_generate" => "hash",
         _ => return Ok(()),
@@ -1541,7 +1593,7 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
         .ok_or_else(|| format!("missing required parameter: {required}"))?;
     let valid = match required {
         "account" | "hash" => value.as_str().is_some_and(|value| !value.is_empty()),
-        "hashes" => value.as_array().is_some_and(|values| {
+        "accounts" | "hashes" => value.as_array().is_some_and(|values| {
             !values.is_empty()
                 && values
                     .iter()
@@ -1559,6 +1611,13 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
             .is_some_and(|count| !count.as_i64().is_some_and(|value| value >= 1))
     {
         return Err("invalid parameter: count".into());
+    }
+    if method == "accounts_balances"
+        && object
+            .get("include_only_confirmed")
+            .is_some_and(|value| !value.is_boolean())
+    {
+        return Err("invalid parameter: include_only_confirmed".into());
     }
     if method == "work_generate"
         && object
@@ -1607,6 +1666,13 @@ fn validate_result(method: &str, result: &Value) -> bool {
         "account_balance" => ["balance", "receivable"]
             .iter()
             .all(|field| has_string(object, field)),
+        "accounts_balances" => object.get("balances").is_some_and(|balances| {
+            balances.as_object().is_some_and(|items| {
+                items
+                    .values()
+                    .all(|item| validate_result("account_balance", item))
+            })
+        }),
         "account_history" => {
             has_string(object, "account") && object.get("history").is_some_and(Value::is_array)
         }
@@ -1671,19 +1737,8 @@ fn normalize_result(method: &str, value: &Value, params: &Value) -> Value {
             }
             normalized
         }
-        "account_balance" => {
-            let mut normalized = value.clone();
-            let Some(fields) = normalized.as_object_mut() else {
-                return normalized;
-            };
-            let receivable = fields
-                .remove("receivable")
-                .or_else(|| fields.remove("pending"))
-                .unwrap_or(Value::String("0".into()));
-            fields.insert("receivable".into(), receivable);
-            fields.remove("pending");
-            normalized
-        }
+        "account_balance" => normalize_account_balance(value),
+        "accounts_balances" => normalize_accounts_balances(value),
         "receivable" => {
             if let Some(entries) = value.as_array() {
                 return Value::Array(entries.iter().map(normalize_receivable_entry).collect());
@@ -1742,6 +1797,33 @@ fn normalize_result(method: &str, value: &Value, params: &Value) -> Value {
         }
         _ => value.clone(),
     }
+}
+
+fn normalize_account_balance(value: &Value) -> Value {
+    let mut normalized = value.clone();
+    let Some(fields) = normalized.as_object_mut() else {
+        return normalized;
+    };
+    let receivable = fields
+        .remove("receivable")
+        .or_else(|| fields.remove("pending"))
+        .unwrap_or(Value::String("0".into()));
+    fields.insert("receivable".into(), receivable);
+    fields.remove("pending");
+    normalized
+}
+
+fn normalize_accounts_balances(value: &Value) -> Value {
+    let mut normalized = value.clone();
+    let Some(fields) = normalized.as_object_mut() else {
+        return normalized;
+    };
+    if let Some(balances) = fields.get_mut("balances").and_then(Value::as_object_mut) {
+        for balance in balances.values_mut() {
+            *balance = normalize_account_balance(balance);
+        }
+    }
+    normalized
 }
 
 fn normalize_receivable_entry(value: &Value) -> Value {
@@ -2263,7 +2345,7 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
                 json!({
                     "reason": if reconnecting { "upstream_reconnected" } else { "upstream_connected" },
                     "profile": state.config.profile,
-                    "reconcile": "Query account_info for affected accounts before applying new confirmations"
+                    "reconcile": "Query accounts_balances for tracked accounts, or account_info for one account, before applying new confirmations"
                 }),
             )
             .await;
@@ -2317,7 +2399,7 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
                 json!({
                     "reason": if result.is_err() { "upstream_disconnected" } else { "upstream_closed" },
                     "profile": state.config.profile,
-                    "reconcile": "Query account_info for affected accounts before applying new confirmations"
+                    "reconcile": "Query accounts_balances for tracked accounts, or account_info for one account, before applying new confirmations"
                 }),
             )
             .await;
@@ -2480,7 +2562,7 @@ mod tests {
     fn openrpc_contains_only_enabled_methods() {
         let document =
             openrpc_document("nano-node/V28.2", false, true, "http://127.0.0.1:7076/rpc");
-        assert_eq!(document["methods"].as_array().expect("methods").len(), 10);
+        assert_eq!(document["methods"].as_array().expect("methods").len(), 11);
     }
 
     #[test]
@@ -2529,6 +2611,55 @@ mod tests {
             assert!(payload.get("id").is_none());
             assert!(payload["params"].is_object());
         }
+    }
+
+    #[test]
+    fn asyncapi_account_tracking_is_limited_to_native_batch_state_refresh() {
+        let document = asyncapi_document("nano-node/V28.2", "https://gateway.invalid/rpc");
+        let tracking = &document["x-nano-account-tracking"];
+        assert_eq!(tracking["state_refresh"]["method"], "accounts_balances");
+        assert_eq!(
+            tracking["state_refresh"]["params"]["include_only_confirmed"],
+            true
+        );
+        assert_eq!(
+            tracking["not_provided"],
+            json!([
+                "balance aggregation",
+                "derived balance events",
+                "vote events",
+                "telemetry events"
+            ])
+        );
+    }
+
+    #[test]
+    fn public_account_tracking_surface_excludes_vote_and_telemetry_features() {
+        let openrpc = openrpc_document(
+            "nano-node/V28.2",
+            false,
+            true,
+            "https://gateway.invalid/rpc",
+        );
+        let methods = openrpc["methods"]
+            .as_array()
+            .expect("OpenRPC methods")
+            .iter()
+            .filter_map(|method| method["name"].as_str())
+            .collect::<Vec<_>>();
+        assert!(methods.contains(&"accounts_balances"));
+        for unsupported in ["account_weight", "confirmation_history", "telemetry"] {
+            assert!(!methods.contains(&unsupported));
+        }
+
+        let asyncapi = asyncapi_document("nano-node/V28.2", "https://gateway.invalid/rpc");
+        let messages = asyncapi["components"]["messages"]
+            .as_object()
+            .expect("AsyncAPI messages")
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(messages, vec!["nano.confirmation", "nano.stream_reset"]);
     }
     #[test]
     fn openrpc_methods_have_callable_shapes() {
@@ -2603,6 +2734,27 @@ mod tests {
             .find(|method| method["name"] == "process")
             .expect("process method");
         assert_eq!(process["x-nano-capability"]["browser_safe"], true);
+    }
+
+    #[test]
+    fn accounts_balances_preserves_each_native_balance_and_normalizes_receivable() {
+        let normalized = normalize_result(
+            "accounts_balances",
+            &json!({"balances": {
+                "nano_first": {"balance": "10", "pending": "1"},
+                "nano_second": {"balance": "20", "receivable": "2"}
+            }}),
+            &json!({"accounts": ["nano_first", "nano_second"]}),
+        );
+        assert_eq!(
+            normalized["balances"]["nano_first"],
+            json!({"balance": "10", "receivable": "1"})
+        );
+        assert_eq!(
+            normalized["balances"]["nano_second"],
+            json!({"balance": "20", "receivable": "2"})
+        );
+        assert!(validate_result("accounts_balances", &normalized));
     }
 
     #[test]
@@ -2784,6 +2936,21 @@ node_ws_urls:
         assert_eq!(request["action"], "account_info");
         assert_eq!(request["include_confirmed"], "true");
         assert!(!request.contains_key("receivable"));
+    }
+
+    #[test]
+    fn accounts_balances_requires_nonempty_accounts_and_a_boolean_confirmation_flag() {
+        assert!(validate_params("accounts_balances", &json!({"accounts": []})).is_err());
+        assert!(validate_params(
+            "accounts_balances",
+            &json!({"accounts": ["nano_test"], "include_only_confirmed": "true"})
+        )
+        .is_err());
+        assert!(validate_params(
+            "accounts_balances",
+            &json!({"accounts": ["nano_test"], "include_only_confirmed": true})
+        )
+        .is_ok());
     }
 
     #[test]

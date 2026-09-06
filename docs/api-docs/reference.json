@@ -1,7 +1,7 @@
 {
   "profile": "nano-node/V28.2",
-  "replay": "Bounded process-local replay. Send Last-Event-ID to resume; nano.stream_reset reports that replay or live continuity is unavailable.",
-  "reset": "Receive-only SSE notifications for a pinned Nano node profile. A reset means consumers must reconcile authoritative state with Nano RPC before applying later confirmations.",
+  "replay": "Bounded process-local replay. Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose destination is a tracked account. For a send, params.hash equals the process result hash. Send Last-Event-ID to resume; deduplicate by hash. nano.stream_reset reports that replay or live continuity is unavailable; call block_info with each tracked hash and inspect result.confirmed.",
+  "reset": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if a reset occurs or confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state.",
   "entries": [
     {
       "kind": "rpc",
@@ -40,6 +40,13 @@
     },
     {
       "kind": "rpc",
+      "name": "accounts_balances",
+      "summary": "Read balances and receivables for several accounts.",
+      "href": "#rpc-accounts_balances",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"accounts_balances\",\n  \"params\": {\n    \"accounts\": [\n      \"<account>\"\n    ]\n  },\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
       "name": "account_history",
       "summary": "Read account history.",
       "href": "#rpc-account_history",
@@ -48,7 +55,7 @@
     {
       "kind": "rpc",
       "name": "block_info",
-      "summary": "Read block metadata.",
+      "summary": "Read block metadata and cementing status for confirmation fallback.",
       "href": "#rpc-block_info",
       "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_info\",\n  \"params\": {\n    \"hash\": \"<hash>\"\n  },\n  \"id\": 1\n}"
     },
@@ -57,12 +64,12 @@
       "name": "blocks_info",
       "summary": "Read metadata for several blocks.",
       "href": "#rpc-blocks_info",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"blocks_info\",\n  \"params\": {\n    \"hashes\": \"<hashes>\"\n  },\n  \"id\": 1\n}"
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"blocks_info\",\n  \"params\": {\n    \"hashes\": [\n      \"<hash>\"\n    ]\n  },\n  \"id\": 1\n}"
     },
     {
       "kind": "rpc",
       "name": "process",
-      "summary": "Submit a precomputed block to the node.",
+      "summary": "Submit a precomputed block and return its hash for confirmation correlation.",
       "href": "#rpc-process",
       "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"process\",\n  \"params\": {\n    \"block\": \"<block>\"\n  },\n  \"id\": 1\n}"
     },
@@ -76,9 +83,9 @@
     {
       "kind": "event",
       "name": "nano.confirmation",
-      "summary": "A block confirmation observed from the configured Nano profile.",
+      "summary": "A cemented block confirmation observed from the configured Nano profile.",
       "href": "#event-nano-confirmation",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"nano.confirmation\",\n  \"params\": {\n    \"account\": \"nano_...\",\n    \"hash\": \"ABC123\",\n    \"profile\": \"nano-node/V28.2\"\n  }\n}"
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"nano.confirmation\",\n  \"params\": {\n    \"account\": \"nano_sender...\",\n    \"block\": {\n      \"link_as_account\": \"nano_new_account...\",\n      \"subtype\": \"send\",\n      \"type\": \"state\"\n    },\n    \"confirmation_type\": \"active_quorum\",\n    \"destination\": \"nano_new_account...\",\n    \"hash\": \"ABC123\",\n    \"profile\": \"nano-node/V28.2\",\n    \"subtype\": \"send\"\n  }\n}"
     },
     {
       "kind": "event",

@@ -167,6 +167,46 @@
         ],
         "type": "object"
       },
+      "AccountsBalancesResult": {
+        "properties": {
+          "balances": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AccountBalanceResult"
+            },
+            "type": "object"
+          },
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "balances"
+        ],
+        "type": "object"
+      },
+      "AccountsParams": {
+        "properties": {
+          "accounts": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "include_only_confirmed": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accounts"
+        ],
+        "type": "object"
+      },
       "BlockCountResult": {
         "properties": {
           "cemented": {
@@ -590,6 +630,59 @@
           "$ref": "#/components/errors/UpstreamRejection"
         }
       ],
+      "name": "accounts_balances",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "accounts",
+          "required": true,
+          "schema": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        {
+          "name": "include_only_confirmed",
+          "required": false,
+          "schema": {
+            "default": true,
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/AccountsBalancesResult"
+        }
+      },
+      "summary": "Read balances and receivables for several accounts.",
+      "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/Unauthorized"
+        },
+        {
+          "$ref": "#/components/errors/UpstreamFailure"
+        },
+        {
+          "$ref": "#/components/errors/UpstreamIndeterminate"
+        },
+        {
+          "$ref": "#/components/errors/UpstreamRejection"
+        }
+      ],
       "name": "account_history",
       "paramStructure": "by-name",
       "params": [
@@ -655,7 +748,7 @@
           "$ref": "#/components/schemas/BlockInfoResult"
         }
       },
-      "summary": "Read block metadata.",
+      "summary": "Read block metadata and cementing status for confirmation fallback.",
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -740,7 +833,7 @@
           "$ref": "#/components/schemas/ProcessResult"
         }
       },
-      "summary": "Submit a precomputed block to the node.",
+      "summary": "Submit a precomputed block and return its hash for confirmation correlation.",
       "x-nano-capability": {
         "browser_safe": true,
         "name": "process",
@@ -776,7 +869,7 @@
       }
     }
   ],
-  "x-nano-artifact-sha256": "sha256:94549bd86a3dccc0ee23b92028de7e04aed30519a0eddc51b36242d5c4609f62",
+  "x-nano-artifact-sha256": "sha256:e146603a165244f5296668e572bdb61fbe5f9430af1adca5973b3d4840d27717",
   "x-nano-common-authentication": {
     "required": true
   },
