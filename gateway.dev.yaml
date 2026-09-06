@@ -1,0 +1,18 @@
+listen: "127.0.0.1:8090"
+node_rpc_urls:
+  - "http://127.0.0.1:7076"
+node_ws_urls:
+  - "ws://127.0.0.1:7078"
+profile: "nano-node/V28.2"
+require_common_auth: false
+allow_work: false
+allow_control: false
+auth_public_key: null
+enable_discovery: true
+enable_inspector: false
+log_rpc: false
+cors_origins:
+  - "http://localhost:5173"
+  - "http://127.0.0.1:5173"
+tls_cert: null
+tls_key: null

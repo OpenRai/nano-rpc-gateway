@@ -9,7 +9,11 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-config="${NANO_GATEWAY_CONFIG:-gateway.yaml}"
+# Keep the development launcher usable from a fresh checkout. The operator
+# config at gateway.yaml is intentionally local-only and commonly contains
+# unset credential placeholders; select it explicitly when those credentials
+# are configured.
+config="${NANO_GATEWAY_CONFIG:-gateway.dev.yaml}"
 config_path="$config"
 if [[ "$config_path" != /* ]]; then
   config_path="$root_dir/$config_path"

@@ -36,6 +36,10 @@ generation is disabled until a PASETO public key and explicit work policy are
 configured. Common methods, including `process`, require PASETO by default;
 set `require_common_auth: false` for an intentionally public Common profile.
 
+For the tmux development launcher, use `make dev-tmux`. It starts with the
+tracked credential-free `gateway.dev.yaml`; select a local credentialed
+configuration explicitly with `NANO_GATEWAY_CONFIG=gateway.yaml make dev-tmux`.
+
 Upstream selection and failure events are always logged with a redacted
 `upstream_url`, for both RPC and WebSocket transports. Detailed JSON-RPC and SSE
 lifecycle diagnostics remain opt-in: set `log_rpc: true` in the config or run
