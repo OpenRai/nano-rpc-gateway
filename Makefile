@@ -1,4 +1,4 @@
-.PHONY: check test clippy build require-nano-rpc gateway playground gateway-playground benchmark resource-benchmark container-benchmark transport-smoke devnet-up devnet-smoke devnet-down
+.PHONY: check test clippy build generate-types require-nano-rpc gateway playground gateway-playground benchmark resource-benchmark container-benchmark transport-smoke devnet-up devnet-smoke devnet-down dev-tmux dev-tmux-start dev-tmux-stop
 check:
 	cargo check --locked
 test:
@@ -7,10 +7,17 @@ clippy:
 	cargo clippy --all-targets --all-features --locked -- -D warnings
 build:
 	cargo build --release --locked
+generate-types:
+	./scripts/generate-types.sh "$${OPENRPC_SCHEMA_URL:-http://127.0.0.1:8090/openrpc.json}" generated
 require-nano-rpc:
 	@test -n "$${NANO_RPC_URL:-}" || (echo 'NANO_RPC_URL is required, for example NANO_RPC_URL=http://127.0.0.1:7076' >&2; exit 2)
 gateway: require-nano-rpc build
 	NANO_RPC_URL="$${NANO_RPC_URL:-}" NANO_WS_URL="$${NANO_WS_URL:-}" ./scripts/run-local-gateway.sh
+dev-tmux:
+	./scripts/dev-tmux.sh
+dev-tmux-start: dev-tmux
+dev-tmux-stop:
+	./scripts/dev-tmux-stop.sh
 playground:
 	cargo run -- playground --gateway-url "$${GATEWAY_URL:-http://127.0.0.1:8090/rpc}" --serve --launch
 gateway-playground: require-nano-rpc build
