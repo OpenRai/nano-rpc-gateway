@@ -1894,6 +1894,14 @@ async fn sse_handler(
                 .data("reconcile with JSON-RPC before applying new events"));
         }
         for item in replay {
+            // Reset controls describe a transport transition, not a durable
+            // confirmation. Replaying historical controls would make a
+            // reconnect consume one old reset after another and churn the
+            // client forever. A stale cursor already gets the synthetic reset
+            // above; live controls continue through the broadcast receiver.
+            if item.event == "nano.stream_reset" {
+                continue;
+            }
             if event_matches_filters(&item, filters.accounts.as_deref(), filters.hashes.as_deref()) {
                 yield Ok::<Event, Infallible>(sse_event(item));
             }
@@ -1950,13 +1958,25 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
             .await
             .map_err(|e| GatewayError::UpstreamUnavailable(e.to_string()))?;
         connected = true;
-        if state.upstream_seen.swap(true, Ordering::Relaxed) {
+        let reconnecting = state.upstream_seen.swap(true, Ordering::Relaxed);
+        if reconnecting {
             state
                 .metrics
                 .upstream_reconnects
                 .fetch_add(1, Ordering::Relaxed);
         }
         state.upstream_ready.store(true, Ordering::Relaxed);
+        state
+            .events
+            .publish(
+                "nano.stream_reset",
+                json!({
+                    "reason": if reconnecting { "upstream_reconnected" } else { "upstream_connected" },
+                    "profile": state.config.profile,
+                    "reconcile": "Query account_info for affected accounts before applying new confirmations"
+                }),
+            )
+            .await;
         while let Some(message) = socket.next().await {
             let value = match message.map_err(|e| GatewayError::UpstreamTransport(e.to_string()))? {
                 Message::Text(text) => serde_json::from_str::<Value>(text.as_ref()),
@@ -2017,6 +2037,16 @@ fn normalize_confirmation(value: &Value, profile: &str) -> Option<Value> {
                 .map(str::to_owned);
             if let Some(destination) = destination {
                 fields.insert("destination".into(), Value::String(destination));
+            }
+        }
+        if !fields.contains_key("subtype") {
+            let subtype = fields
+                .get("block")
+                .and_then(Value::as_object)
+                .and_then(|block| block.get("subtype"))
+                .cloned();
+            if let Some(subtype) = subtype {
+                fields.insert("subtype".into(), subtype);
             }
         }
         fields.insert("profile".into(), Value::String(profile.into()));
@@ -2877,11 +2907,13 @@ node_ws_urls:
         assert!(run_ws_bridge(state.clone()).await.is_ok());
         server.await.expect("server task");
         let (_, events) = state.events.replay(None).await;
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].event, "nano.confirmation");
-        assert_eq!(events[0].data["profile"], "nano-node/V28.2");
-        assert_eq!(events[1].event, "nano.stream_reset");
-        assert_eq!(events[1].data["reason"], "upstream_closed");
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].event, "nano.stream_reset");
+        assert_eq!(events[0].data["reason"], "upstream_connected");
+        assert_eq!(events[1].event, "nano.confirmation");
+        assert_eq!(events[1].data["profile"], "nano-node/V28.2");
+        assert_eq!(events[2].event, "nano.stream_reset");
+        assert_eq!(events[2].data["reason"], "upstream_closed");
     }
 
     #[tokio::test]
@@ -2920,9 +2952,10 @@ node_ws_urls:
         server.await.expect("server task");
         assert_eq!(state.metrics.upstream_reconnects.load(Ordering::Relaxed), 1);
         let (_, events) = state.events.replay(None).await;
-        assert_eq!(events.len(), 2);
-        assert!(events
-            .iter()
-            .all(|event| event.event == "nano.stream_reset"));
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].data["reason"], "upstream_connected");
+        assert_eq!(events[1].data["reason"], "upstream_closed");
+        assert_eq!(events[2].data["reason"], "upstream_reconnected");
+        assert_eq!(events[3].data["reason"], "upstream_closed");
     }
 }
