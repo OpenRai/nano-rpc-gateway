@@ -160,10 +160,7 @@ async fn main() -> anyhow::Result<()> {
                 loop {
                     tokio::select! {
                         _ = bridge_shutdown.cancelled() => break,
-                        result = nano_rpc_gateway::run_ws_bridge(bridge_state.clone()) => {
-                            if let Err(error) = result {
-                                tracing::warn!(%error, "native WebSocket bridge disconnected; retrying");
-                            }
+                        _ = nano_rpc_gateway::run_ws_bridge(bridge_state.clone()) => {
                             tokio::select! {
                                 _ = bridge_shutdown.cancelled() => break,
                                 _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}

@@ -36,10 +36,12 @@ generation is disabled until a PASETO public key and explicit work policy are
 configured. Common methods, including `process`, require PASETO by default;
 set `require_common_auth: false` for an intentionally public Common profile.
 
-Safe JSON-RPC and SSE lifecycle diagnostics are opt-in: set `log_rpc: true`
-in the config or run `cargo run -- --log-rpc serve`. The logs include request
-receipt, upstream origin/status/duration, and subscription filter counts, but
-never request parameters, account/hash values, tokens, or provider credentials.
+Upstream selection and failure events are always logged with a redacted
+`upstream_url`, for both RPC and WebSocket transports. Detailed JSON-RPC and SSE
+lifecycle diagnostics remain opt-in: set `log_rpc: true` in the config or run
+`cargo run -- --log-rpc serve`. These detailed logs include request receipt,
+upstream status/duration, and subscription filter counts, but never request
+parameters, account/hash values, tokens, or provider credentials.
 
 For local inspection, enable `enable_inspector` in the gateway config and open
 `/inspector/`. The embedded inspector is dynamically pointed at the gateway's

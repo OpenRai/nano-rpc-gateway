@@ -836,7 +836,7 @@ impl NativeClient {
         let response = match request.send().await {
             Ok(response) => response,
             Err(error) => {
-                log_upstream_error("rpc", &redacted_endpoint, &error.to_string());
+                log_upstream_error("rpc", &self.endpoint, &error.to_string());
                 return Err(if error.is_connect() {
                     GatewayError::UpstreamUnavailable(error.to_string())
                 } else if error.is_timeout() {
@@ -876,7 +876,7 @@ impl NativeClient {
         let value: Value = match response.json().await {
             Ok(value) => value,
             Err(error) => {
-                log_upstream_error("rpc", &redacted_endpoint, &error.to_string());
+                log_upstream_error("rpc", &self.endpoint, &error.to_string());
                 return Err(GatewayError::UpstreamTransport(error.to_string()));
             }
         };
@@ -975,12 +975,14 @@ fn log_upstream_selected(protocol: &str, endpoint: &str, selection: &str) {
 }
 
 fn log_upstream_error(protocol: &str, endpoint: &str, error: &str) {
+    let redacted_endpoint = redact_upstream_url(endpoint);
+    let safe_error = error.replace(endpoint, &redacted_endpoint);
     tracing::warn!(
         target: "nano_rpc_gateway::upstream",
         event = "upstream_error",
         protocol,
-        upstream_url = %redact_upstream_url(endpoint),
-        error,
+        upstream_url = %redacted_endpoint,
+        error = %safe_error,
         "upstream error"
     );
 }
@@ -1112,9 +1114,13 @@ impl NativeRouter {
                 Err(error) => return Err(error),
             }
         }
-        Err(last_error.unwrap_or_else(|| {
-            GatewayError::UpstreamUnavailable("all upstreams cooling down".into())
-        }))
+        if let Some(error) = last_error {
+            return Err(error);
+        }
+        let error = GatewayError::UpstreamUnavailable("all upstreams cooling down".into());
+        let index = self.active_index();
+        log_upstream_error("rpc", &self.clients[index].endpoint, &error.to_string());
+        Err(error)
     }
 
     fn can_failover(&self, error: &GatewayError) -> bool {
@@ -1145,13 +1151,10 @@ impl NativeRouter {
         ))
     }
 
-    pub async fn mark_ws_unhealthy(&self, index: usize, ws_urls: &[String]) {
+    pub async fn mark_ws_unhealthy(&self, index: usize) {
         self.unhealthy_until.lock().await[index] = Instant::now() + UPSTREAM_COOLDOWN;
         let next = (index + 1) % self.clients.len();
-        let previous = self.active.swap(next, Ordering::Release);
-        if previous != next {
-            log_upstream_selected("websocket", &ws_urls[next], "active_changed");
-        }
+        self.active.store(next, Ordering::Release);
     }
 }
 
@@ -2158,22 +2161,59 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
     state.upstream_ready.store(false, Ordering::Relaxed);
     let mut connected = false;
     let mut ws_index = None;
+    let mut selected_ws_url = None;
     let result = async {
-        let (index, ws_url) = state
+        let (index, ws_url) = match state
             .native
             .active_ws_url(&state.config.node_ws_urls)
-            .await?;
-        ws_index = Some(index);
-        validate_upstream_url(&ws_url, &["ws", "wss"])?;
-        let (mut socket, _) = connect_async(&ws_url)
             .await
-            .map_err(|e| GatewayError::UpstreamUnavailable(e.to_string()))?;
-        socket
+        {
+            Ok(selection) => selection,
+            Err(error) => {
+                let index = state.native.active_index();
+                if let Some(ws_url) = state.config.node_ws_urls.get(index) {
+                    log_upstream_error("websocket", ws_url, &error.to_string());
+                }
+                return Err(error);
+            }
+        };
+        ws_index = Some(index);
+        selected_ws_url = Some(ws_url.clone());
+        {
+            let mut selected = state.ws_selected.lock().await;
+            if selected.as_deref() != Some(ws_url.as_str()) {
+                log_upstream_selected(
+                    "websocket",
+                    &ws_url,
+                    if selected.is_some() {
+                        "active_changed"
+                    } else {
+                        "initial"
+                    },
+                );
+                *selected = Some(ws_url.clone());
+            }
+        }
+        if let Err(error) = validate_upstream_url(&ws_url, &["ws", "wss"]) {
+            log_upstream_error("websocket", &ws_url, &error.to_string());
+            return Err(error);
+        }
+        let (mut socket, _) = match connect_async(&ws_url).await {
+            Ok(connection) => connection,
+            Err(error) => {
+                log_upstream_error("websocket", &ws_url, &error.to_string());
+                return Err(GatewayError::UpstreamUnavailable(error.to_string()));
+            }
+        };
+        if let Err(error) = socket
             .send(Message::Text(
                 json!({"action":"subscribe","topic":"confirmation"}).to_string(),
             ))
             .await
-            .map_err(|e| GatewayError::UpstreamUnavailable(e.to_string()))?;
+        {
+            log_upstream_error("websocket", &ws_url, &error.to_string());
+            return Err(GatewayError::UpstreamUnavailable(error.to_string()));
+        }
         connected = true;
         let reconnecting = state.upstream_seen.swap(true, Ordering::Relaxed);
         if reconnecting {
@@ -2195,7 +2235,14 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
             )
             .await;
         while let Some(message) = socket.next().await {
-            let value = match message.map_err(|e| GatewayError::UpstreamTransport(e.to_string()))? {
+            let message = match message {
+                Ok(message) => message,
+                Err(error) => {
+                    log_upstream_error("websocket", &ws_url, &error.to_string());
+                    return Err(GatewayError::UpstreamTransport(error.to_string()));
+                }
+            };
+            let value = match message {
                 Message::Text(text) => serde_json::from_str::<Value>(text.as_ref()),
                 Message::Binary(bytes) => {
                     let Ok(text) = std::str::from_utf8(bytes.as_ref()) else {
@@ -2219,6 +2266,17 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
         state.native.mark_ws_unhealthy(index).await;
     }
     if connected {
+        if result.is_ok() {
+            if let Some(ws_url) = selected_ws_url.as_deref() {
+                tracing::warn!(
+                    target: "nano_rpc_gateway::upstream",
+                    event = "upstream_closed",
+                    protocol = "websocket",
+                    upstream_url = %redact_upstream_url(ws_url),
+                    "websocket upstream closed"
+                );
+            }
+        }
         state
             .events
             .publish(
@@ -2586,6 +2644,15 @@ mod tests {
             .expect("test upstream URL");
         assert_eq!(upstream_label(&url), "https://nodes.example.test");
     }
+
+    #[test]
+    fn upstream_url_redaction_preserves_endpoint_without_secrets() {
+        assert_eq!(
+            redact_upstream_url("https://api-key:@nodes.example.test/XNO?api_key=secret"),
+            "https://nodes.example.test/XNO?api_key=****"
+        );
+    }
+
     #[test]
     fn rate_limit_error_detection_accepts_provider_variants() {
         assert!(is_rate_limited_error(&json!("429")));

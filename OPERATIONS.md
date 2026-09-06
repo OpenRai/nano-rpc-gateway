@@ -28,13 +28,15 @@ hash, request ID, token, or raw error text is used as a metric label.
    `require_common_auth: false` only when the public Common profile is
    intentional; this makes `process` callable without a token.
    Set `enable_inspector: true` only for trusted operator/developer access.
-   For temporary request diagnostics, set `log_rpc: true` or pass
-   `--log-rpc` to `serve`. This emits structured `rpc_request`,
+   Upstream selection and failure events are always emitted for RPC and
+   WebSocket transports. They include a redacted `upstream_url` so failover,
+   disconnect, and upstream-error records identify the affected provider.
+   For temporary request diagnostics, set `log_rpc: true` or pass `--log-rpc`
+   to `serve`. This additionally emits structured `rpc_request`,
    `rpc_upstream_response`, `sse_subscription_opened`, and
-   `sse_subscription_closed` events. The upstream-response event includes only
-   the method, upstream origin, HTTP status, and duration; it does not log
-   request parameters, account or hash values, tokens, or upstream credentials.
-   Keep it disabled for normal production operation.
+   `sse_subscription_closed` events. These detailed events do not log request
+   parameters, account or hash values, tokens, or upstream credentials. Keep
+   detailed diagnostics disabled for normal production operation.
 4. Start `nano-rpc-gateway serve --config /etc/nano-rpc-gateway/gateway.yaml`.
 5. Check `/health`, `/readyz`, and `/metrics` before routing traffic. `/health`
    is process liveness; `/readyz` returns 200 only after the native
