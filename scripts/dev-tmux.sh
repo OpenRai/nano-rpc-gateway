@@ -56,6 +56,7 @@ tmux select-pane -t "$gateway_pane" -T 'GATEWAY'
 
 echo "Started gateway in tmux session '$session' using $config."
 echo "Attach later with: tmux attach -t $session"
+echo "Override the config with: NANO_GATEWAY_CONFIG=/path/to/config make dev-tmux"
 echo "Stop it with: make dev-tmux-stop"
 if [[ -t 0 && -t 1 ]]; then
   exec tmux attach-session -t "$session"
