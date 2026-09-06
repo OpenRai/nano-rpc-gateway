@@ -1,0 +1,91 @@
+{
+  "profile": "nano-node/V28.2",
+  "replay": "Bounded process-local replay. Send Last-Event-ID to resume; nano.stream_reset reports that replay or live continuity is unavailable.",
+  "reset": "Receive-only SSE notifications for a pinned Nano node profile. A reset means consumers must reconcile authoritative state with Nano RPC before applying later confirmations.",
+  "entries": [
+    {
+      "kind": "rpc",
+      "name": "version",
+      "summary": "Read the upstream node version.",
+      "href": "#rpc-version",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"version\",\n  \"params\": {},\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "block_count",
+      "summary": "Read upstream ledger block counts.",
+      "href": "#rpc-block_count",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_count\",\n  \"params\": {},\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "account_info",
+      "summary": "Read account frontier and representative state.",
+      "href": "#rpc-account_info",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_info\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "receivable",
+      "summary": "Read receivable blocks for an account.",
+      "href": "#rpc-receivable",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"receivable\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "account_balance",
+      "summary": "Read an account balance.",
+      "href": "#rpc-account_balance",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_balance\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "account_history",
+      "summary": "Read account history.",
+      "href": "#rpc-account_history",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_history\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "block_info",
+      "summary": "Read block metadata.",
+      "href": "#rpc-block_info",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_info\",\n  \"params\": {\n    \"hash\": \"<hash>\"\n  },\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "blocks_info",
+      "summary": "Read metadata for several blocks.",
+      "href": "#rpc-blocks_info",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"blocks_info\",\n  \"params\": {\n    \"hashes\": \"<hashes>\"\n  },\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "process",
+      "summary": "Submit a precomputed block to the node.",
+      "href": "#rpc-process",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"process\",\n  \"params\": {\n    \"block\": \"<block>\"\n  },\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "rpc",
+      "name": "rpc.discover",
+      "summary": "Return this OpenRPC document.",
+      "href": "#rpc-rpc-discover",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"rpc.discover\",\n  \"params\": {},\n  \"id\": 1\n}"
+    },
+    {
+      "kind": "event",
+      "name": "nano.confirmation",
+      "summary": "A block confirmation observed from the configured Nano profile.",
+      "href": "#event-nano-confirmation",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"nano.confirmation\",\n  \"params\": {\n    \"account\": \"nano_...\",\n    \"hash\": \"ABC123\",\n    \"profile\": \"nano-node/V28.2\"\n  }\n}"
+    },
+    {
+      "kind": "event",
+      "name": "nano.stream_reset",
+      "summary": "Stream continuity was lost or changed; reconcile before continuing.",
+      "href": "#event-nano-stream_reset",
+      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"nano.stream_reset\",\n  \"params\": {\n    \"profile\": \"nano-node/V28.2\",\n    \"reason\": \"replay_unavailable\",\n    \"reconcile\": \"Query authoritative Nano RPC state before applying new confirmations\"\n  }\n}"
+    }
+  ]
+}

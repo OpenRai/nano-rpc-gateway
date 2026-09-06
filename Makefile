@@ -1,4 +1,4 @@
-.PHONY: check test clippy build generate-types require-nano-rpc gateway playground gateway-playground benchmark resource-benchmark container-benchmark transport-smoke devnet-up devnet-smoke devnet-down dev-tmux dev-tmux-start dev-tmux-stop
+.PHONY: check test clippy build generate-types contracts docs-install docs-validate docs-generate docs-check docs-model-smoke docs-preview require-nano-rpc gateway playground gateway-playground benchmark resource-benchmark container-benchmark transport-smoke devnet-up devnet-smoke devnet-down dev-tmux dev-tmux-start dev-tmux-stop
 check:
 	cargo check --locked
 test:
@@ -9,6 +9,21 @@ build:
 	cargo build --release --locked
 generate-types:
 	./scripts/generate-types.sh "$${OPENRPC_SCHEMA_URL:-http://127.0.0.1:8090/openrpc.json}" generated
+contracts:
+	cargo run --quiet -- contracts --output-dir docs/api-docs
+	cp -f docs/api-docs/openrpc.json generated/nano-node-v28.2.openrpc.json
+docs-install:
+	npm --prefix docs ci --ignore-scripts
+docs-validate: docs-install docs-generate
+	npm --prefix docs run validate
+docs-generate: docs-install
+	npm --prefix docs run generate
+docs-check: docs-install
+	npm --prefix docs run check
+docs-model-smoke: docs-install docs-generate
+	npm --prefix docs run models
+docs-preview: docs-install docs-generate
+	npm --prefix docs run preview
 require-nano-rpc:
 	@test -n "$${NANO_RPC_URL:-}" || (echo 'NANO_RPC_URL is required, for example NANO_RPC_URL=http://127.0.0.1:7076' >&2; exit 2)
 gateway: require-nano-rpc build

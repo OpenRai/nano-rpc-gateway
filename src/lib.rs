@@ -500,6 +500,162 @@ pub fn openrpc_artifact_digest(
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+#[derive(Clone, Copy)]
+struct EventSpec {
+    name: &'static str,
+    summary: &'static str,
+    params_schema: &'static str,
+}
+
+fn event_registry() -> [EventSpec; 2] {
+    [
+        EventSpec {
+            name: "nano.confirmation",
+            summary: "A block confirmation observed from the configured Nano profile.",
+            params_schema: "ConfirmationParams",
+        },
+        EventSpec {
+            name: "nano.stream_reset",
+            summary: "Stream continuity was lost or changed; reconcile before continuing.",
+            params_schema: "StreamResetParams",
+        },
+    ]
+}
+
+/// Build the receive-only AsyncAPI contract for confirmation SSE consumers.
+pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
+    let parsed_gateway = Url::parse(gateway_url).ok();
+    let protocol = parsed_gateway.as_ref().map_or("https", |url| url.scheme());
+    let host = parsed_gateway.as_ref().map_or_else(
+        || gateway_url.to_owned(),
+        |url| {
+            let port = url
+                .port()
+                .map_or_else(String::new, |port| format!(":{port}"));
+            format!("{}{}", url.host_str().unwrap_or("gateway.invalid"), port)
+        },
+    );
+    let messages = event_registry()
+        .into_iter()
+        .map(|event| {
+            (
+                event.name.to_owned(),
+                json!({
+                    "name": event.name,
+                    "title": event.name,
+                    "summary": event.summary,
+                    "contentType": "application/json",
+                    "payload": notification_schema(event.name, event.params_schema),
+                    "examples": [{"payload": notification_example(event.name, profile)}]
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    json!({
+        "asyncapi": "3.1.0",
+        "info": {
+            "title": "Nano Gateway Events",
+            "version": "0.1.0",
+            "description": "Receive-only SSE notifications for a pinned Nano node profile. A reset means consumers must reconcile authoritative state with Nano RPC before applying later confirmations."
+        },
+        "defaultContentType": "application/json",
+        "servers": {"gateway": {"host": host, "protocol": protocol, "pathname": "/events/confirmations"}},
+        "channels": {
+            "confirmations": {
+                "address": "/events/confirmations",
+                "title": "Confirmation event stream",
+                "description": "Bounded process-local replay. Send Last-Event-ID to resume; nano.stream_reset reports that replay or live continuity is unavailable.",
+                "servers": [{"$ref": "#/servers/gateway"}],
+                "messages": {
+                    "nanoConfirmation": {"$ref": "#/components/messages/nano.confirmation"},
+                    "nanoStreamReset": {"$ref": "#/components/messages/nano.stream_reset"}
+                },
+                "bindings": {"http": {"bindingVersion": "0.3.0"}}
+            }
+        },
+        "operations": {
+            "receiveConfirmations": {
+                "action": "receive",
+                "summary": "Receive Nano confirmation and stream reset notifications.",
+                "channel": {"$ref": "#/channels/confirmations"},
+                "bindings": {"http": {
+                    "method": "GET",
+                    "query": {"type": "object", "properties": {
+                        "accounts": {"type": "string", "description": "Comma-separated account filter."},
+                        "hashes": {"type": "string", "description": "Comma-separated block hash filter."}
+                    }},
+                    "bindingVersion": "0.3.0"
+                }}
+            }
+        },
+        "components": {
+            "messages": messages,
+            "schemas": {
+                "ConfirmationParams": confirmation_params_schema(),
+                "StreamResetParams": stream_reset_params_schema()
+            }
+        },
+        "x-nano-profile": profile,
+        "x-http-response": {
+            "contentType": "text/event-stream",
+            "headers": {"Last-Event-ID": {"type": "string", "description": "Resume after this SSE event cursor."}}
+        }
+    })
+}
+
+fn notification_schema(method: &str, params_schema: &str) -> Value {
+    json!({
+        "type": "object", "additionalProperties": false,
+        "required": ["jsonrpc", "method", "params"],
+        "properties": {
+            "jsonrpc": {"const": "2.0"}, "method": {"const": method},
+            "params": {"$ref": format!("#/components/schemas/{params_schema}")}
+        }
+    })
+}
+
+fn confirmation_params_schema() -> Value {
+    json!({
+        "type": "object", "required": ["profile", "hash"],
+        "properties": {
+            "profile": {"type": "string"}, "hash": {"type": "string"},
+            "account": {"type": "string"}, "destination": {"type": "string"},
+            "amount": {"type": "string"}, "confirmation_type": {"type": "string"},
+            "block": {"type": "object", "additionalProperties": true},
+            "election_info": {"type": "object", "additionalProperties": true}
+        }, "additionalProperties": true
+    })
+}
+
+fn stream_reset_params_schema() -> Value {
+    json!({
+        "type": "object", "additionalProperties": false,
+        "required": ["reason", "profile", "reconcile"],
+        "properties": {
+            "reason": {"type": "string", "enum": ["upstream_connected", "upstream_reconnected", "upstream_disconnected", "upstream_closed", "replay_unavailable", "subscriber_lagged"]},
+            "profile": {"type": "string"}, "reconcile": {"type": "string"}
+        }
+    })
+}
+
+fn notification_example(method: &str, profile: &str) -> Value {
+    match method {
+        "nano.confirmation" => notification(
+            method,
+            json!({"profile": profile, "hash": "ABC123", "account": "nano_..."}),
+        ),
+        _ => notification(method, reset_params("replay_unavailable", profile)),
+    }
+}
+
+fn notification(method: &str, params: Value) -> Value {
+    json!({"jsonrpc": "2.0", "method": method, "params": params})
+}
+
+fn reset_params(reason: &str, profile: &str) -> Value {
+    json!({"reason": reason, "profile": profile, "reconcile": "Query authoritative Nano RPC state before applying new confirmations"})
+}
+
 fn build_openrpc_document(
     profile: &str,
     include_work: bool,
@@ -677,15 +833,19 @@ impl NativeClient {
         if let Some((username, password)) = &self.basic_auth {
             request = request.basic_auth(username, Some(password));
         }
-        let response = request.send().await.map_err(|e| {
-            if e.is_connect() {
-                GatewayError::UpstreamUnavailable(e.to_string())
-            } else if e.is_timeout() {
-                GatewayError::UpstreamIndeterminate(e.to_string())
-            } else {
-                GatewayError::UpstreamTransport(e.to_string())
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(error) => {
+                log_upstream_error("rpc", &redacted_endpoint, &error.to_string());
+                return Err(if error.is_connect() {
+                    GatewayError::UpstreamUnavailable(error.to_string())
+                } else if error.is_timeout() {
+                    GatewayError::UpstreamIndeterminate(error.to_string())
+                } else {
+                    GatewayError::UpstreamTransport(error.to_string())
+                });
             }
-        })?;
+        };
         let status = response.status();
         if log_response {
             tracing::info!(
@@ -693,6 +853,7 @@ impl NativeClient {
                 event = "rpc_upstream_response",
                 method = action,
                 upstream = %self.label,
+                upstream_url = %redacted_endpoint,
                 status = status.as_u16(),
                 duration_ms = started.elapsed().as_millis() as u64,
                 "Nano RPC response >>>"
@@ -702,7 +863,7 @@ impl NativeClient {
             tracing::warn!(
                 action,
                 upstream = %self.label,
-                endpoint = %redacted_endpoint,
+                upstream_url = %redacted_endpoint,
                 authorization,
                 %status,
                 "native upstream returned an unsuccessful response"
@@ -712,10 +873,13 @@ impl NativeClient {
             }
             return Err(GatewayError::Upstream(format!("HTTP {status}")));
         }
-        let value: Value = response
-            .json()
-            .await
-            .map_err(|e| GatewayError::UpstreamTransport(e.to_string()))?;
+        let value: Value = match response.json().await {
+            Ok(value) => value,
+            Err(error) => {
+                log_upstream_error("rpc", &redacted_endpoint, &error.to_string());
+                return Err(GatewayError::UpstreamTransport(error.to_string()));
+            }
+        };
         if let Some(error) = value.get("error") {
             if action == "account_info"
                 && error
@@ -737,7 +901,7 @@ impl NativeClient {
                 tracing::warn!(
                     action,
                     upstream = %self.label,
-                    endpoint = %redacted_endpoint,
+                    upstream_url = %redacted_endpoint,
                     authorization,
                     reason = %error,
                     "native upstream rate limited request"
@@ -750,7 +914,7 @@ impl NativeClient {
                 tracing::warn!(
                     action,
                     upstream = %self.label,
-                    endpoint = %redacted_endpoint,
+                    upstream_url = %redacted_endpoint,
                     authorization,
                     "native upstream rejected a process request"
                 );
@@ -758,7 +922,7 @@ impl NativeClient {
                 tracing::warn!(
                     action,
                     upstream = %self.label,
-                    endpoint = %redacted_endpoint,
+                    upstream_url = %redacted_endpoint,
                     authorization,
                     reason = %error,
                     "native upstream rejected request"
@@ -778,19 +942,47 @@ impl NativeClient {
     }
 
     fn redacted_endpoint(&self) -> String {
-        let Ok(mut endpoint) = Url::parse(&self.endpoint) else {
-            return self.label.clone();
-        };
-        if endpoint.query().is_some() {
-            let query = endpoint
-                .query_pairs()
-                .map(|(name, _)| format!("{name}=****"))
-                .collect::<Vec<_>>()
-                .join("&");
-            endpoint.set_query(Some(&query));
-        }
-        endpoint.to_string()
+        redact_upstream_url(&self.endpoint)
     }
+}
+
+fn redact_upstream_url(value: &str) -> String {
+    let Ok(mut endpoint) = Url::parse(value) else {
+        return "(invalid upstream URL)".into();
+    };
+    let _ = endpoint.set_username("");
+    let _ = endpoint.set_password(None);
+    if endpoint.query().is_some() {
+        let query = endpoint
+            .query_pairs()
+            .map(|(name, _)| format!("{name}=****"))
+            .collect::<Vec<_>>()
+            .join("&");
+        endpoint.set_query(Some(&query));
+    }
+    endpoint.to_string()
+}
+
+fn log_upstream_selected(protocol: &str, endpoint: &str, selection: &str) {
+    tracing::info!(
+        target: "nano_rpc_gateway::upstream",
+        event = "upstream_selected",
+        protocol,
+        upstream_url = %redact_upstream_url(endpoint),
+        selection,
+        "upstream selected"
+    );
+}
+
+fn log_upstream_error(protocol: &str, endpoint: &str, error: &str) {
+    tracing::warn!(
+        target: "nano_rpc_gateway::upstream",
+        event = "upstream_error",
+        protocol,
+        upstream_url = %redact_upstream_url(endpoint),
+        error,
+        "upstream error"
+    );
 }
 
 fn is_rate_limited_error(error: &Value) -> bool {
@@ -867,6 +1059,7 @@ impl NativeRouter {
                 "at least one upstream RPC URL is required".into(),
             ));
         }
+        log_upstream_selected("rpc", &clients[0].endpoint, "initial");
         Ok(Self {
             clients: Arc::new(clients),
             active: Arc::new(AtomicUsize::new(0)),
@@ -902,7 +1095,14 @@ impl NativeRouter {
                 .await
             {
                 Ok(value) => {
-                    self.active.store(index, Ordering::Release);
+                    let previous = self.active.swap(index, Ordering::Release);
+                    if previous != index {
+                        log_upstream_selected(
+                            "rpc",
+                            &self.clients[index].endpoint,
+                            "active_changed",
+                        );
+                    }
                     return Ok(value);
                 }
                 Err(error) if self.can_failover(&error) => {
@@ -923,8 +1123,11 @@ impl NativeRouter {
 
     async fn mark_unhealthy(&self, index: usize) {
         self.unhealthy_until.lock().await[index] = Instant::now() + UPSTREAM_COOLDOWN;
-        self.active
-            .store((index + 1) % self.clients.len(), Ordering::Release);
+        let next = (index + 1) % self.clients.len();
+        let previous = self.active.swap(next, Ordering::Release);
+        if previous != next {
+            log_upstream_selected("rpc", &self.clients[next].endpoint, "active_changed");
+        }
     }
 
     pub async fn active_ws_url(&self, ws_urls: &[String]) -> Result<(usize, String), GatewayError> {
@@ -942,8 +1145,13 @@ impl NativeRouter {
         ))
     }
 
-    pub async fn mark_ws_unhealthy(&self, index: usize) {
-        self.mark_unhealthy(index).await;
+    pub async fn mark_ws_unhealthy(&self, index: usize, ws_urls: &[String]) {
+        self.unhealthy_until.lock().await[index] = Instant::now() + UPSTREAM_COOLDOWN;
+        let next = (index + 1) % self.clients.len();
+        let previous = self.active.swap(next, Ordering::Release);
+        if previous != next {
+            log_upstream_selected("websocket", &ws_urls[next], "active_changed");
+        }
     }
 }
 
@@ -1075,6 +1283,7 @@ pub struct AppState {
     pub verifying_key: Option<VerifyingKey>,
     pub upstream_ready: Arc<AtomicBool>,
     upstream_seen: Arc<AtomicBool>,
+    ws_selected: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone, Default)]
@@ -1141,8 +1350,18 @@ fn log_rpc_request(method: &str) {
 }
 
 fn sse_event(item: NanoEvent) -> Event {
-    let data = serde_json::to_string(&item.data).unwrap_or_else(|_| "null".into());
+    let data = serde_json::to_string(&notification(&item.event, item.data))
+        .unwrap_or_else(|_| "null".into());
     Event::default().id(item.id).event(item.event).data(data)
+}
+
+fn reset_sse_event(reason: &str, profile: &str) -> Event {
+    let data = serde_json::to_string(&notification(
+        "nano.stream_reset",
+        reset_params(reason, profile),
+    ))
+    .unwrap_or_else(|_| "null".into());
+    Event::default().event("nano.stream_reset").data(data)
 }
 
 impl AppState {
@@ -1161,6 +1380,7 @@ impl AppState {
             verifying_key,
             upstream_ready: Arc::new(AtomicBool::new(false)),
             upstream_seen: Arc::new(AtomicBool::new(false)),
+            ws_selected: Arc::new(Mutex::new(None)),
         })
     }
     async fn dispatch(&self, request: RpcRequest, headers: &HeaderMap) -> RpcResponse {
@@ -1583,6 +1803,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/rpc", post(rpc_handler))
         .route("/openrpc.json", get(openrpc_handler))
+        .route("/asyncapi.json", get(asyncapi_handler))
         .route("/inspector", get(inspector_handler))
         .route("/inspector/", get(inspector_handler))
         .route("/events/confirmations", get(sse_handler))
@@ -1724,6 +1945,14 @@ async fn openrpc_handler(State(state): State<AppState>) -> Response {
         }
     }
     response
+}
+
+async fn asyncapi_handler(State(state): State<AppState>) -> Response {
+    Json(asyncapi_document(
+        &state.config.profile,
+        &state.gateway_url(),
+    ))
+    .into_response()
 }
 
 async fn inspector_handler(State(state): State<AppState>) -> Response {
@@ -1889,19 +2118,9 @@ async fn sse_handler(
             hash_filter_count,
         };
         if reset {
-            yield Ok::<Event, Infallible>(Event::default()
-                .event("nano.stream_reset")
-                .data("reconcile with JSON-RPC before applying new events"));
+            yield Ok::<Event, Infallible>(reset_sse_event("replay_unavailable", &state.config.profile));
         }
         for item in replay {
-            // Reset controls describe a transport transition, not a durable
-            // confirmation. Replaying historical controls would make a
-            // reconnect consume one old reset after another and churn the
-            // client forever. A stale cursor already gets the synthetic reset
-            // above; live controls continue through the broadcast receiver.
-            if item.event == "nano.stream_reset" {
-                continue;
-            }
             if event_matches_filters(&item, filters.accounts.as_deref(), filters.hashes.as_deref()) {
                 yield Ok::<Event, Infallible>(sse_event(item));
             }
@@ -1915,9 +2134,7 @@ async fn sse_handler(
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     replay_resets.fetch_add(1, Ordering::Relaxed);
                     state.metrics.overflow_resets.fetch_add(1, Ordering::Relaxed);
-                    yield Ok::<Event, Infallible>(Event::default()
-                        .event("nano.stream_reset")
-                        .data("reconnect and reconcile with JSON-RPC"));
+                    yield Ok::<Event, Infallible>(reset_sse_event("subscriber_lagged", &state.config.profile));
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             }
@@ -2007,7 +2224,7 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
             .publish(
                 "nano.stream_reset",
                 json!({
-                    "reason": if result.is_err() { "upstream_disconnect" } else { "upstream_closed" },
+                    "reason": if result.is_err() { "upstream_disconnected" } else { "upstream_closed" },
                     "profile": state.config.profile,
                     "reconcile": "Query account_info for affected accounts before applying new confirmations"
                 }),
@@ -2173,6 +2390,54 @@ mod tests {
         let document =
             openrpc_document("nano-node/V28.2", false, true, "http://127.0.0.1:7076/rpc");
         assert_eq!(document["methods"].as_array().expect("methods").len(), 10);
+    }
+
+    #[test]
+    fn asyncapi_inventory_matches_event_registry() {
+        let document = asyncapi_document("nano-node/V28.2", "https://gateway.invalid/rpc");
+        let advertised = document["components"]["messages"]
+            .as_object()
+            .expect("AsyncAPI messages");
+        let expected = event_registry()
+            .into_iter()
+            .map(|event| event.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            advertised.keys().map(String::as_str).collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
+    fn asyncapi_reset_schema_lists_every_runtime_reason() {
+        let document = asyncapi_document("nano-node/V28.2", "https://gateway.invalid/rpc");
+        assert_eq!(
+            document["components"]["schemas"]["StreamResetParams"]["properties"]["reason"]["enum"],
+            json!([
+                "upstream_connected",
+                "upstream_reconnected",
+                "upstream_disconnected",
+                "upstream_closed",
+                "replay_unavailable",
+                "subscriber_lagged"
+            ])
+        );
+    }
+
+    #[test]
+    fn notification_examples_match_their_sse_event_names() {
+        let document = asyncapi_document("nano-node/V28.2", "https://gateway.invalid/rpc");
+        for message in document["components"]["messages"]
+            .as_object()
+            .expect("AsyncAPI messages")
+            .values()
+        {
+            let payload = &message["examples"][0]["payload"];
+            assert_eq!(payload["jsonrpc"], "2.0");
+            assert_eq!(payload["method"], message["name"]);
+            assert!(payload.get("id").is_none());
+            assert!(payload["params"].is_object());
+        }
     }
     #[test]
     fn openrpc_methods_have_callable_shapes() {

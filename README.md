@@ -12,13 +12,22 @@ The proposed external surface combines:
 
 The gateway translates these interfaces to the node's native action-based RPC
 and WebSocket interfaces. The v0.1 implementation accepts JSON-RPC 2.0 at
-`POST /rpc`, serves `/openrpc.json`, and emits confirmations at
-`/events/confirmations`.
+`POST /rpc`, serves callable-method discovery at `/openrpc.json`, serves the
+receive-only SSE contract at `/asyncapi.json`, and emits confirmations at
+`/events/confirmations`. Every SSE `data:` value is a JSON-RPC 2.0 notification;
+its `method` matches the SSE `event:` name and it has no `id` member.
 
 The Clean V28.2 profile is authority-reviewed in
 [SCHEMA_POLICY.md](SCHEMA_POLICY.md), exposes a stable artifact digest, and
 ships generated TypeScript bindings in [generated/](generated/). Regenerate
 bindings with `make generate-types` against the reviewed schema endpoint.
+
+The committed reference in [docs/api-docs/](docs/api-docs/) combines RPC and Events
+tabs, global search, deep links, and raw OpenRPC/AsyncAPI downloads. Run
+`make docs-install`, then `make docs-generate`, `make docs-validate`, or
+`make docs-preview`. `make docs-model-smoke` proves the AsyncAPI contract can
+produce typed event models without shipping a subscriber library from this
+gateway.
 
 Run `cargo run -- serve`; a missing `gateway.yaml` is created with safe
 defaults (`127.0.0.1:8090` for the gateway, leaving Nano's conventional native

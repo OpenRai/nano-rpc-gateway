@@ -1,0 +1,20 @@
+{
+  "name": "nano-rpc-gateway-reference",
+  "private": true,
+  "scripts": {
+    "contracts": "cargo run --quiet --manifest-path ../Cargo.toml -- contracts --output-dir api-docs && cp -f api-docs/openrpc.json ../generated/nano-node-v28.2.openrpc.json",
+    "validate:asyncapi": "asyncapi validate api-docs/asyncapi.json",
+    "validate:openrpc": "node scripts/validate-openrpc.mjs",
+    "validate": "npm run validate:openrpc && npm run validate:asyncapi",
+    "models": "asyncapi generate models typescript api-docs/asyncapi.json --no-interactive --tsModelType interface --tsExportType named --output .model-smoke",
+    "site": "node scripts/generate-site.mjs",
+    "generate": "npm run contracts && npm run validate && npm run site",
+    "check": "node scripts/check-generated.mjs",
+    "preview": "node scripts/preview.mjs"
+  },
+  "devDependencies": {
+    "@asyncapi/cli": "6.0.2",
+    "@open-rpc/meta-schema": "1.14.9",
+    "ajv": "8.20.0"
+  }
+}

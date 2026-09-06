@@ -602,6 +602,39 @@ async fn discovery_can_be_disabled_without_removing_static_schema() {
 }
 
 #[tokio::test]
+async fn asyncapi_endpoint_documents_receive_only_sse_messages() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/asyncapi.json")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    let document: Value = serde_json::from_slice(&body).expect("AsyncAPI JSON");
+    assert_eq!(document["asyncapi"], "3.1.0");
+    assert_eq!(
+        document["operations"]["receiveConfirmations"]["action"],
+        "receive"
+    );
+    assert_eq!(
+        document["x-http-response"]["contentType"],
+        "text/event-stream"
+    );
+    assert!(document["components"]["messages"]
+        .get("nano.confirmation")
+        .is_some());
+    assert!(document["components"]["messages"]
+        .get("nano.stream_reset")
+        .is_some());
+}
+
+#[tokio::test]
 async fn embedded_inspector_is_opt_in_and_uses_gateway_endpoints() {
     let mut config = test_config(start_native_stub().await);
     config.enable_inspector = true;
@@ -715,7 +748,8 @@ async fn confirmation_stream_emits_reset_for_unknown_generation() {
         .expect("reset bytes");
     let text = String::from_utf8(frame.to_vec()).expect("reset text");
     assert!(text.contains("event: nano.stream_reset"));
-    assert!(text.contains("reconcile with JSON-RPC"));
+    assert!(text.contains("\"method\":\"nano.stream_reset\""));
+    assert!(text.contains("\"reason\":\"replay_unavailable\""));
     assert_eq!(state.metrics.replay_misses.load(Ordering::Relaxed), 1);
 }
 
@@ -752,6 +786,8 @@ async fn confirmation_stream_replays_events_after_last_event_id() {
     assert!(text.contains("id: "));
     assert!(text.contains(&second.id));
     assert!(text.contains("\"hash\":\"second\""));
+    assert!(text.contains("\"jsonrpc\":\"2.0\""));
+    assert!(text.contains("\"method\":\"nano.confirmation\""));
     assert_eq!(state.metrics.replay_hits.load(Ordering::Relaxed), 1);
 }
 

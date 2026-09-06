@@ -7,6 +7,8 @@
 
 # Rust build artifacts
 /target/
+/docs/node_modules/
+/docs/.model-smoke/
 
 # Operator-local configuration and credentials
 /gateway.yaml

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Nano Gateway RPC and event contracts"><title>Nano Gateway Reference</title><link rel="stylesheet" href="assets/reference.css"></head>
+<body><header><a class="brand" href="#top"><span class="mark">N</span><span>Nano Gateway<small>nano-node/V28.2</small></span></a><nav><a href="openrpc.json">OpenRPC JSON</a><a href="asyncapi.json">AsyncAPI JSON</a></nav></header>
+<main id="top"><section class="hero"><p class="kicker">Unified API reference</p><h1>Call methods. Receive events.</h1><p>OpenRPC defines callable Nano RPC operations. AsyncAPI defines the receive-only confirmation stream. Two contracts, one searchable reference.</p><label class="search"><span>Search</span><input id="search" type="search" placeholder="Try account_info or stream reset" autocomplete="off"></label></section>
+<div class="tabs" role="tablist"><button class="tab active" data-tab="rpc">RPC <span>10</span></button><button class="tab" data-tab="event">Events <span>2</span></button></div>
+<section id="rpc" class="panel active"><div class="intro"><h2>RPC methods</h2><p>Callable JSON-RPC 2.0 request and response methods from the Clean V28.2 profile.</p></div><article id="rpc-version" data-entry="version Read the upstream node version."><div class="eyebrow">JSON-RPC method</div><h2>version</h2><p>Read the upstream node version.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "version",
+  "params": {},
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-block_count" data-entry="block_count Read upstream ledger block counts."><div class="eyebrow">JSON-RPC method</div><h2>block_count</h2><p>Read upstream ledger block counts.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "block_count",
+  "params": {},
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-account_info" data-entry="account_info Read account frontier and representative state."><div class="eyebrow">JSON-RPC method</div><h2>account_info</h2><p>Read account frontier and representative state.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "account_info",
+  "params": {
+    "account": "&lt;account&gt;"
+  },
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-receivable" data-entry="receivable Read receivable blocks for an account."><div class="eyebrow">JSON-RPC method</div><h2>receivable</h2><p>Read receivable blocks for an account.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "receivable",
+  "params": {
+    "account": "&lt;account&gt;"
+  },
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-account_balance" data-entry="account_balance Read an account balance."><div class="eyebrow">JSON-RPC method</div><h2>account_balance</h2><p>Read an account balance.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "account_balance",
+  "params": {
+    "account": "&lt;account&gt;"
+  },
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-account_history" data-entry="account_history Read account history."><div class="eyebrow">JSON-RPC method</div><h2>account_history</h2><p>Read account history.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "account_history",
+  "params": {
+    "account": "&lt;account&gt;"
+  },
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-block_info" data-entry="block_info Read block metadata."><div class="eyebrow">JSON-RPC method</div><h2>block_info</h2><p>Read block metadata.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "block_info",
+  "params": {
+    "hash": "&lt;hash&gt;"
+  },
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-blocks_info" data-entry="blocks_info Read metadata for several blocks."><div class="eyebrow">JSON-RPC method</div><h2>blocks_info</h2><p>Read metadata for several blocks.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "blocks_info",
+  "params": {
+    "hashes": "&lt;hashes&gt;"
+  },
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-process" data-entry="process Submit a precomputed block to the node."><div class="eyebrow">JSON-RPC method</div><h2>process</h2><p>Submit a precomputed block to the node.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "process",
+  "params": {
+    "block": "&lt;block&gt;"
+  },
+  "id": 1
+}</code></pre></div></article>
+<article id="rpc-rpc-discover" data-entry="rpc.discover Return this OpenRPC document."><div class="eyebrow">JSON-RPC method</div><h2>rpc.discover</h2><p>Return this OpenRPC document.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "rpc.discover",
+  "params": {},
+  "id": 1
+}</code></pre></div></article></section>
+<section id="event" class="panel"><div class="intro"><h2>Confirmation events</h2><p>Bounded process-local replay. Send Last-Event-ID to resume; nano.stream_reset reports that replay or live continuity is unavailable.</p><p>Receive-only SSE notifications for a pinned Nano node profile. A reset means consumers must reconcile authoritative state with Nano RPC before applying later confirmations.</p><code>GET /events/confirmations</code> <code>Last-Event-ID</code> <code>text/event-stream</code></div><article id="event-nano-confirmation" data-entry="nano.confirmation A block confirmation observed from the configured Nano profile."><div class="eyebrow">SSE notification</div><h2>nano.confirmation</h2><p>A block confirmation observed from the configured Nano profile.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "nano.confirmation",
+  "params": {
+    "account": "nano_...",
+    "hash": "ABC123",
+    "profile": "nano-node/V28.2"
+  }
+}</code></pre></div></article>
+<article id="event-nano-stream_reset" data-entry="nano.stream_reset Stream continuity was lost or changed; reconcile before continuing."><div class="eyebrow">SSE notification</div><h2>nano.stream_reset</h2><p>Stream continuity was lost or changed; reconcile before continuing.</p><div class="example"><button class="copy" type="button">Copy</button><pre><code>{
+  "jsonrpc": "2.0",
+  "method": "nano.stream_reset",
+  "params": {
+    "profile": "nano-node/V28.2",
+    "reason": "replay_unavailable",
+    "reconcile": "Query authoritative Nano RPC state before applying new confirmations"
+  }
+}</code></pre></div></article></section>
+<p id="empty" hidden>No contract entries match that search.</p></main><script src="assets/reference.js"></script></body></html>

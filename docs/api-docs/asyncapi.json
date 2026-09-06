@@ -1,0 +1,227 @@
+{
+  "asyncapi": "3.1.0",
+  "channels": {
+    "confirmations": {
+      "address": "/events/confirmations",
+      "bindings": {
+        "http": {
+          "bindingVersion": "0.3.0"
+        }
+      },
+      "description": "Bounded process-local replay. Send Last-Event-ID to resume; nano.stream_reset reports that replay or live continuity is unavailable.",
+      "messages": {
+        "nanoConfirmation": {
+          "$ref": "#/components/messages/nano.confirmation"
+        },
+        "nanoStreamReset": {
+          "$ref": "#/components/messages/nano.stream_reset"
+        }
+      },
+      "servers": [
+        {
+          "$ref": "#/servers/gateway"
+        }
+      ],
+      "title": "Confirmation event stream"
+    }
+  },
+  "components": {
+    "messages": {
+      "nano.confirmation": {
+        "contentType": "application/json",
+        "examples": [
+          {
+            "payload": {
+              "jsonrpc": "2.0",
+              "method": "nano.confirmation",
+              "params": {
+                "account": "nano_...",
+                "hash": "ABC123",
+                "profile": "nano-node/V28.2"
+              }
+            }
+          }
+        ],
+        "name": "nano.confirmation",
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "nano.confirmation"
+            },
+            "params": {
+              "$ref": "#/components/schemas/ConfirmationParams"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        "summary": "A block confirmation observed from the configured Nano profile.",
+        "title": "nano.confirmation"
+      },
+      "nano.stream_reset": {
+        "contentType": "application/json",
+        "examples": [
+          {
+            "payload": {
+              "jsonrpc": "2.0",
+              "method": "nano.stream_reset",
+              "params": {
+                "profile": "nano-node/V28.2",
+                "reason": "replay_unavailable",
+                "reconcile": "Query authoritative Nano RPC state before applying new confirmations"
+              }
+            }
+          }
+        ],
+        "name": "nano.stream_reset",
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "nano.stream_reset"
+            },
+            "params": {
+              "$ref": "#/components/schemas/StreamResetParams"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        "summary": "Stream continuity was lost or changed; reconcile before continuing.",
+        "title": "nano.stream_reset"
+      }
+    },
+    "schemas": {
+      "ConfirmationParams": {
+        "additionalProperties": true,
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "block": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "confirmation_type": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "election_info": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile",
+          "hash"
+        ],
+        "type": "object"
+      },
+      "StreamResetParams": {
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "upstream_connected",
+              "upstream_reconnected",
+              "upstream_disconnected",
+              "upstream_closed",
+              "replay_unavailable",
+              "subscriber_lagged"
+            ],
+            "type": "string"
+          },
+          "reconcile": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "profile",
+          "reconcile"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "defaultContentType": "application/json",
+  "info": {
+    "description": "Receive-only SSE notifications for a pinned Nano node profile. A reset means consumers must reconcile authoritative state with Nano RPC before applying later confirmations.",
+    "title": "Nano Gateway Events",
+    "version": "0.1.0"
+  },
+  "operations": {
+    "receiveConfirmations": {
+      "action": "receive",
+      "bindings": {
+        "http": {
+          "bindingVersion": "0.3.0",
+          "method": "GET",
+          "query": {
+            "properties": {
+              "accounts": {
+                "description": "Comma-separated account filter.",
+                "type": "string"
+              },
+              "hashes": {
+                "description": "Comma-separated block hash filter.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        }
+      },
+      "channel": {
+        "$ref": "#/channels/confirmations"
+      },
+      "summary": "Receive Nano confirmation and stream reset notifications."
+    }
+  },
+  "servers": {
+    "gateway": {
+      "host": "gateway.invalid",
+      "pathname": "/events/confirmations",
+      "protocol": "https"
+    }
+  },
+  "x-http-response": {
+    "contentType": "text/event-stream",
+    "headers": {
+      "Last-Event-ID": {
+        "description": "Resume after this SSE event cursor.",
+        "type": "string"
+      }
+    }
+  },
+  "x-nano-profile": "nano-node/V28.2"
+}

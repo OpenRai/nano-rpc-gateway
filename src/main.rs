@@ -6,7 +6,10 @@ use std::{
 
 use base64::Engine;
 use clap::{Parser, Subcommand, ValueEnum};
-use nano_rpc_gateway::{app, generate_signing_key, playground_url, sign_paseto, AppState, Config};
+use nano_rpc_gateway::{
+    app, asyncapi_document, generate_signing_key, openrpc_document_with_auth, playground_url,
+    sign_paseto, AppState, Config,
+};
 use serde_json::json;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing_subscriber::EnvFilter;
@@ -117,6 +120,11 @@ enum CommandKind {
         serve: bool,
     },
     Keygen,
+    /// Export the versioned machine-readable contracts.
+    Contracts {
+        #[arg(long, default_value = "generated")]
+        output_dir: PathBuf,
+    },
     Issue {
         #[arg(long)]
         secret: String,
@@ -235,6 +243,22 @@ async fn main() -> anyhow::Result<()> {
                 "secret_key={}",
                 base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.to_bytes())
             );
+        }
+        CommandKind::Contracts { output_dir } => {
+            std::fs::create_dir_all(&output_dir)?;
+            let openrpc = openrpc_document_with_auth(
+                "nano-node/V28.2",
+                false,
+                true,
+                "https://gateway.invalid/rpc",
+                true,
+            );
+            let asyncapi = asyncapi_document("nano-node/V28.2", "https://gateway.invalid/rpc");
+            for (name, document) in [("openrpc.json", openrpc), ("asyncapi.json", asyncapi)] {
+                let mut bytes = serde_json::to_vec_pretty(&document)?;
+                bytes.push(b'\n');
+                std::fs::write(output_dir.join(name), bytes)?;
+            }
         }
         CommandKind::Issue {
             secret,

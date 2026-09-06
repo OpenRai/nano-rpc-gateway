@@ -14,3 +14,23 @@ jobs:
       - run: cargo build --release --locked
       - run: bash -n scripts/*.sh
       - run: docker compose -f docker-compose.dev.yml config
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: docs
+      - run: npm run check
+        working-directory: docs
+      - run: npm run models
+        working-directory: docs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nano-rpc-gateway-reference-${{ github.sha }}
+          path: docs/api-docs/
