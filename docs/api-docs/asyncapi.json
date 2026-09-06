@@ -189,7 +189,7 @@
           "query": {
             "properties": {
               "accounts": {
-                "description": "Comma-separated account filter.",
+                "description": "Comma-separated account filter matching the confirmed block account or destination; nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied.",
                 "type": "string"
               },
               "hashes": {

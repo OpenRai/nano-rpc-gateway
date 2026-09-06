@@ -754,6 +754,72 @@ async fn confirmation_stream_emits_reset_for_unknown_generation() {
 }
 
 #[tokio::test]
+async fn confirmation_stream_filters_accounts_for_replay_and_live_events() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account":"nano_filtered", "hash":"MATCH-REPLAY"}),
+        )
+        .await;
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account":"nano_other", "hash":"MISS-REPLAY"}),
+        )
+        .await;
+
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/events/confirmations?accounts=xrb_filtered")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state.clone())
+        .oneshot(request)
+        .await
+        .expect("gateway response");
+    let mut body = response.into_body();
+
+    let replay = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
+        .await
+        .expect("replay timeout")
+        .expect("replay frame")
+        .expect("replay data")
+        .into_data()
+        .expect("replay bytes");
+    let replay_text = String::from_utf8(replay.to_vec()).expect("replay text");
+    assert!(replay_text.contains("MATCH-REPLAY"));
+    assert!(!replay_text.contains("MISS-REPLAY"));
+
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account":"nano_other", "hash":"MISS-LIVE"}),
+        )
+        .await;
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account":"nano_filtered", "hash":"MATCH-LIVE"}),
+        )
+        .await;
+    let live = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
+        .await
+        .expect("live timeout")
+        .expect("live frame")
+        .expect("live data")
+        .into_data()
+        .expect("live bytes");
+    let live_text = String::from_utf8(live.to_vec()).expect("live text");
+    assert!(live_text.contains("MATCH-LIVE"));
+    assert!(!live_text.contains("MISS-LIVE"));
+}
+
+#[tokio::test]
 async fn confirmation_stream_replays_events_after_last_event_id() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let first = state

@@ -581,7 +581,7 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
                 "bindings": {"http": {
                     "method": "GET",
                     "query": {"type": "object", "properties": {
-                        "accounts": {"type": "string", "description": "Comma-separated account filter."},
+                        "accounts": {"type": "string", "description": "Comma-separated account filter matching the confirmed block account or destination; nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied."},
                         "hashes": {"type": "string", "description": "Comma-separated block hash filter."}
                     }},
                     "bindingVersion": "0.3.0"
@@ -2024,6 +2024,28 @@ struct EventFilters {
     hashes: Option<Vec<String>>,
 }
 
+fn accounts_equal(left: &str, right: &str) -> bool {
+    let left_account = left
+        .strip_prefix("nano_")
+        .or_else(|| left.strip_prefix("xrb_"));
+    let right_account = right
+        .strip_prefix("nano_")
+        .or_else(|| right.strip_prefix("xrb_"));
+    match (left_account, right_account) {
+        (Some(left), Some(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+fn is_legacy_confirmation(item: &NanoEvent) -> bool {
+    item.data
+        .get("block")
+        .and_then(Value::as_object)
+        .and_then(|block| block.get("type"))
+        .and_then(Value::as_str)
+        .is_some_and(|block_type| matches!(block_type, "open" | "send" | "receive" | "change"))
+}
+
 fn event_matches_filters(
     item: &NanoEvent,
     accounts: Option<&[String]>,
@@ -2032,24 +2054,35 @@ fn event_matches_filters(
     if item.event != "nano.confirmation" {
         return true;
     }
+    if accounts.is_some_and(|values| !values.is_empty()) && is_legacy_confirmation(item) {
+        return false;
+    }
     let account_match = accounts.is_none_or(|values| {
         let source_matches = item
             .data
             .get("account")
             .and_then(Value::as_str)
-            .is_some_and(|account| values.iter().any(|wanted| wanted == account));
+            .is_some_and(|account| values.iter().any(|wanted| accounts_equal(wanted, account)));
         let destination_matches = item
             .data
             .get("destination")
             .and_then(Value::as_str)
-            .is_some_and(|destination| values.iter().any(|wanted| wanted == destination))
+            .is_some_and(|destination| {
+                values
+                    .iter()
+                    .any(|wanted| accounts_equal(wanted, destination))
+            })
             || item
                 .data
                 .get("block")
                 .and_then(Value::as_object)
                 .and_then(|block| block.get("link_as_account"))
                 .and_then(Value::as_str)
-                .is_some_and(|destination| values.iter().any(|wanted| wanted == destination));
+                .is_some_and(|destination| {
+                    values
+                        .iter()
+                        .any(|wanted| accounts_equal(wanted, destination))
+                });
         source_matches || destination_matches
     });
     let hash_match = hashes.is_none_or(|values| {
@@ -3046,6 +3079,34 @@ node_ws_urls:
         };
         assert!(event_matches_accounts(&item, Some(&["nano_a".into()])));
         assert!(!event_matches_accounts(&item, Some(&["nano_b".into()])));
+        assert!(event_matches_accounts(&item, None));
+    }
+
+    #[test]
+    fn confirmation_filter_treats_nano_and_xrb_prefixes_as_equivalent() {
+        let item = NanoEvent {
+            id: "1".into(),
+            event: "nano.confirmation".into(),
+            data: json!({"account":"nano_3example"}),
+        };
+        assert!(event_matches_accounts(
+            &item,
+            Some(&["xrb_3example".into()])
+        ));
+        assert!(!event_matches_accounts(
+            &item,
+            Some(&["xrb_3different".into()])
+        ));
+    }
+
+    #[test]
+    fn confirmation_filter_excludes_legacy_blocks_when_accounts_are_given() {
+        let item = NanoEvent {
+            id: "1".into(),
+            event: "nano.confirmation".into(),
+            data: json!({"account":"nano_a", "block":{"type":"open"}}),
+        };
+        assert!(!event_matches_accounts(&item, Some(&["nano_a".into()])));
         assert!(event_matches_accounts(&item, None));
     }
 
