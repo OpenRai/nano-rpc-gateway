@@ -60,9 +60,11 @@ Integrator or developer
           Nano or RsNano node
 ```
 
-The gateway is not a byte-preserving proxy. It is a protocol adapter with a
-normalized public contract. That distinction is essential because native Nano
-RPC does not use the JSON-RPC 2.0 envelope.
+The gateway is a plumbing boundary, not a Nano transaction interpreter. It
+repackages the native action RPC and WebSocket transports, hides active/passive
+upstream failover, and exposes only reviewed data-shape normalization. Native
+Nano RPC does not use the JSON-RPC 2.0 envelope, so the public contract is
+explicitly versioned rather than a compatibility alias surface.
 
 ## 3. Guiding intent
 
@@ -119,19 +121,18 @@ share one internal Nano translation boundary.
           │ JSON-RPC adapter   SSE adapter │
           └───────────┬────────────┬───────┘
                       │            │
-              operation model  event model
-                      │            │
           ┌───────────┴────────────┴───────┐
-          │ node RPC adapter  node WS adapter │
+          │ resilient upstream router       │
+          │ HTTP RPC + WebSocket             │
           └────────────────────────────────┘
                          Node seam
 ```
 
-The translation boundary turns native Nano HTTP replies and WebSocket messages
-into the gateway's public method results, errors, and events. Both JSON-RPC
-calls and SSE updates use it, so they do not acquire separate meanings for the
-same error, confirmation, overflow, or reconnect. The HTTP-facing adapters can
-change without changing those public meanings.
+The boundary preserves data types and stable error/reconnect meanings while
+leaving protocol interpretation to clients and nodes. Both JSON-RPC calls and
+SSE updates use the same resilient upstream router, so failover, indeterminate
+write outcomes, confirmation continuity, and reset signals cannot drift
+between transports.
 
 ## 6. Scope
 

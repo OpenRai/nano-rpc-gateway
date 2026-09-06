@@ -15,25 +15,27 @@ and WebSocket interfaces. The v0.1 implementation accepts JSON-RPC 2.0 at
 `POST /rpc`, serves `/openrpc.json`, and emits confirmations at
 `/events/confirmations`.
 
+The Clean V28.2 profile is authority-reviewed in
+[SCHEMA_POLICY.md](SCHEMA_POLICY.md), exposes a stable artifact digest, and
+ships generated TypeScript bindings in [generated/](generated/). Regenerate
+bindings with `make generate-types` against the reviewed schema endpoint.
+
 Run `cargo run -- serve`; a missing `gateway.yaml` is created with safe
 defaults (`127.0.0.1:8090` for the gateway, leaving Nano's conventional native
 RPC port `7076` available). Base reads are unauthenticated, while work
 generation is disabled until a PASETO public key and explicit work policy are
-configured.
+configured. Common methods, including `process`, require PASETO by default;
+set `require_common_auth: false` for an intentionally public Common profile.
 
-For the shortest local path, set the Nano node's native RPC URL and run
-`NANO_RPC_URL=http://127.0.0.1:7076 make gateway-playground`. This builds the
-release gateway, starts it against that backend, serves the pinned stock
-OpenRPC Playground on `127.0.0.1:8080`, prints the preconfigured Playground
-URL, and opens it on macOS. When the node uses a nonstandard WebSocket URL, add
-`NANO_WS_URL=ws://host:port`; the conventional `http(s)://host:7076` URL is
-mapped to `ws(s)://host:7078` automatically. Press Ctrl-C to stop both
-processes. Use `NANO_RPC_URL=... make gateway` when you only want the gateway.
+Safe JSON-RPC and SSE lifecycle diagnostics are opt-in: set `log_rpc: true`
+in the config or run `cargo run -- --log-rpc serve`. The logs include request
+receipt, upstream origin/status/duration, and subscription filter counts, but
+never request parameters, account/hash values, tokens, or provider credentials.
 
-Run `make playground` to serve and open the stock `@open-rpc/playground`
-against the local gateway and schema. Playground is a development companion,
-not part of the gateway process or production image; omit `--serve` to print a
-hosted Playground URL instead.
+For local inspection, enable `enable_inspector` in the gateway config and open
+`/inspector/`. The embedded inspector is dynamically pointed at the gateway's
+own `/openrpc.json` and `/rpc` endpoints. It is disabled by default;
+external OpenRPC tools can still consume the same schema.
 
 Operational deployment and isolation guidance is in [OPERATIONS.md](OPERATIONS.md);
 the reproducible request harness is [scripts/benchmark.sh](scripts/benchmark.sh),

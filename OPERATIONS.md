@@ -12,9 +12,29 @@ the gateway process; they are not Nano ledger or consensus metrics. No account,
 hash, request ID, token, or raw error text is used as a metric label.
 
 1. Copy `gateway.yaml.example` to the mounted configuration directory.
-2. Set `node_rpc_url` and `node_ws_url` to the private node listeners.
+2. Set parallel `node_rpc_urls` and `node_ws_urls` lists to the private node listeners.
+   Public providers can be used when their terms and rate limits are suitable:
+   Nanswap accepts `https://nodes.nanswap.com/XNO?api_key=${NANSWAP_COM_API_KEY}` and
+   `wss://nodes.nanswap.com/ws/?ticker=XNO&api_key=${NANSWAP_COM_API_KEY}`;
+   Nano.to accepts `https://${NANO_TO_API_KEY}:@rpc.nano.to/` for HTTP and
+   `wss://ws.nano.to` for WebSocket. The gateway loads an optional `.env` beside
+   the chosen configuration file, expands `${NAME}` values before parsing YAML,
+   and lets explicitly exported environment variables take precedence.
+   The gateway strips Nano.to URL userinfo before issuing the request and sends
+   it as empty-password Basic authentication. Keep these key-bearing values in
+   a deployment secret or untracked local config, never in a committed example.
 3. Leave `allow_work` and `allow_control` disabled unless the corresponding
-   policy and PASETO verification key have been reviewed.
+   policy and PASETO verification key have been reviewed. Set
+   `require_common_auth: false` only when the public Common profile is
+   intentional; this makes `process` callable without a token.
+   Set `enable_inspector: true` only for trusted operator/developer access.
+   For temporary request diagnostics, set `log_rpc: true` or pass
+   `--log-rpc` to `serve`. This emits structured `rpc_request`,
+   `rpc_upstream_response`, `sse_subscription_opened`, and
+   `sse_subscription_closed` events. The upstream-response event includes only
+   the method, upstream origin, HTTP status, and duration; it does not log
+   request parameters, account or hash values, tokens, or upstream credentials.
+   Keep it disabled for normal production operation.
 4. Start `nano-rpc-gateway serve --config /etc/nano-rpc-gateway/gateway.yaml`.
 5. Check `/health`, `/readyz`, and `/metrics` before routing traffic. `/health`
    is process liveness; `/readyz` returns 200 only after the native
@@ -31,13 +51,10 @@ After `nano.stream_reset`, reconcile state with JSON-RPC before applying new
 events. Rotate PASETO signing keys by replacing the configured verification
 key and issuing short-lived tokens; the gateway stores no token revocation DB.
 
-For the shortest local developer path, run
-`NANO_RPC_URL=http://127.0.0.1:7076 make gateway-playground`. This builds and
-starts the gateway against the supplied Nano RPC backend, serves the pinned
-stock OpenRPC Playground package on loopback:8080, and prints/opens a URL
-targeting the gateway's `/openrpc.json`; it is not included in the gateway
-image. Run `make playground` when the gateway is already running and only the
-Playground process is needed.
+For local inspection, set `enable_inspector: true` and open `/inspector/`.
+The embedded inspector reads the same runtime `/openrpc.json` document and
+sends requests to the gateway's `/rpc` endpoint. It is disabled by default;
+external OpenRPC tooling remains useful when the route is not enabled.
 
 For a disposable compatibility smoke on a Docker host, run `make devnet-smoke`.
 It pulls the pinned official V28.2 image, starts it with the runtime Dev-network
