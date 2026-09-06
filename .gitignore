@@ -12,6 +12,7 @@
 
 # Operator-local configuration and credentials
 /gateway.yaml
+/gateway.dev.yaml
 /gateway.local-public.yaml
 /.env
 /.env.*

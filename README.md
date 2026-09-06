@@ -37,7 +37,8 @@ configured. Common methods, including `process`, require PASETO by default;
 set `require_common_auth: false` for an intentionally public Common profile.
 
 For the tmux development launcher, use `make dev-tmux`. It starts with the
-tracked credential-free `gateway.dev.yaml`; select a local credentialed
+local credential-free `gateway.dev.yaml` (created from built-in safe defaults);
+select a local credentialed
 configuration explicitly with `NANO_GATEWAY_CONFIG=gateway.yaml make dev-tmux`.
 
 Upstream selection and failure events are always logged with a redacted
