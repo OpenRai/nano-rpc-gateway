@@ -71,7 +71,7 @@
           ],
           "type": "object"
         },
-        "summary": "A cemented block confirmation observed from the configured Nano profile.",
+        "summary": "A block from the configured Nano profile has been cemented.",
         "title": "nano.confirmation"
       },
       "nano.stream_reset": {
@@ -110,7 +110,7 @@
           ],
           "type": "object"
         },
-        "summary": "Stream continuity was lost or changed; reconcile before continuing.",
+        "summary": "The stream lost continuity. Reconcile before processing more events.",
         "title": "nano.stream_reset"
       }
     },
@@ -241,6 +241,14 @@
   },
   "x-nano-account-tracking": {
     "accounts_filter": "Subscribe with the watched accounts before any related process call.",
+    "frontier_confirmation": {
+      "cemented_frontier_field": "result.confirmed_frontier",
+      "current_frontier_field": "result.frontier",
+      "method": "account_info",
+      "status_field": "result.confirmed",
+      "status_method": "block_info",
+      "when": "Use this flow when the known account frontier, rather than a submitted block hash, is the starting point. Query the current frontier and inspect its confirmation status."
+    },
     "not_provided": [
       "balance aggregation",
       "derived balance events",

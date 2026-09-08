@@ -1,98 +1,165 @@
 {
   "profile": "nano-node/V28.2",
-  "replay": "Bounded process-local replay. Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose destination is a tracked account. For a send, params.hash equals the process result hash. Send Last-Event-ID to resume; deduplicate by hash. nano.stream_reset reports that replay or live continuity is unavailable; call block_info with each tracked hash and inspect result.confirmed.",
-  "reset": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if a reset occurs or confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state.",
+  "accountTracking": {
+    "accounts_filter": "Subscribe with the watched accounts before any related process call.",
+    "frontier_confirmation": {
+      "cemented_frontier_field": "result.confirmed_frontier",
+      "current_frontier_field": "result.frontier",
+      "method": "account_info",
+      "status_field": "result.confirmed",
+      "status_method": "block_info",
+      "when": "Use this flow when the known account frontier, rather than a submitted block hash, is the starting point. Query the current frontier and inspect its confirmation status."
+    },
+    "not_provided": [
+      "balance aggregation",
+      "derived balance events",
+      "vote events",
+      "telemetry events"
+    ],
+    "state_refresh": {
+      "method": "accounts_balances",
+      "params": {
+        "accounts": "the watched accounts",
+        "include_only_confirmed": true
+      },
+      "result": {
+        "balances": "per-account balance and receivable values"
+      },
+      "when": "Seed state once, then refresh in one batch after a matching confirmation or stream reset; do not poll."
+    }
+  },
+  "confirmationTracking": {
+    "correlation": {
+      "confirmation_hash": "params.hash",
+      "idempotency_key": "params.hash",
+      "process_method": "process",
+      "process_result_hash": "result.hash"
+    },
+    "fallback": {
+      "confirmed_field": "result.confirmed",
+      "method": "block_info",
+      "params": {
+        "hash": "process result hash"
+      },
+      "suggested_delay_seconds": 5
+    },
+    "subscribe_before_process": true
+  },
   "entries": [
     {
       "kind": "rpc",
       "name": "version",
       "summary": "Read the upstream node version.",
       "href": "#rpc-version",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"version\",\n  \"params\": {},\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"version\",\n  \"params\": {},\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"rpc_version\": \"<string>\"\n  }\n}",
+      "search": "version Read the upstream node version. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"version\",\n  \"params\": {},\n  \"id\": 1\n} {\n  \"result\": {\n    \"rpc_version\": \"<string>\"\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "block_count",
       "summary": "Read upstream ledger block counts.",
       "href": "#rpc-block_count",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_count\",\n  \"params\": {},\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_count\",\n  \"params\": {},\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"cemented\": \"<string>\",\n    \"count\": \"<string>\",\n    \"unchecked\": \"<string>\"\n  }\n}",
+      "search": "block_count Read upstream ledger block counts. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_count\",\n  \"params\": {},\n  \"id\": 1\n} {\n  \"result\": {\n    \"cemented\": \"<string>\",\n    \"count\": \"<string>\",\n    \"unchecked\": \"<string>\"\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "account_info",
-      "summary": "Read account frontier and representative state.",
+      "summary": "Read current and confirmed frontier state for one account.",
       "href": "#rpc-account_info",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_info\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_info\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"balance\": \"<string>\",\n    \"confirmation_height\": \"<string>\",\n    \"confirmation_height_frontier\": \"<string | null>\",\n    \"confirmed_balance\": \"<string>\",\n    \"confirmed_frontier\": \"<string | null>\",\n    \"frontier\": \"<string | null>\",\n    \"open_block\": \"<string | null>\",\n    \"opened\": \"<boolean>\",\n    \"representative_block\": \"<string | null>\"\n  }\n}",
+      "search": "account_info Read current and confirmed frontier state for one account. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_info\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n} {\n  \"result\": {\n    \"balance\": \"<string>\",\n    \"confirmation_height\": \"<string>\",\n    \"confirmation_height_frontier\": \"<string | null>\",\n    \"confirmed_balance\": \"<string>\",\n    \"confirmed_frontier\": \"<string | null>\",\n    \"frontier\": \"<string | null>\",\n    \"open_block\": \"<string | null>\",\n    \"opened\": \"<boolean>\",\n    \"representative_block\": \"<string | null>\"\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "receivable",
       "summary": "Read receivable blocks for an account.",
       "href": "#rpc-receivable",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"receivable\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"receivable\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": [\n    {\n      \"amount\": \"<string>\",\n      \"hash\": \"<string>\",\n      \"source\": \"<string>\"\n    }\n  ]\n}",
+      "search": "receivable Read receivable blocks for an account. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"receivable\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n} {\n  \"result\": [\n    {\n      \"amount\": \"<string>\",\n      \"hash\": \"<string>\",\n      \"source\": \"<string>\"\n    }\n  ]\n}"
     },
     {
       "kind": "rpc",
       "name": "account_balance",
-      "summary": "Read an account balance.",
+      "summary": "Read balance and receivable state for one account.",
       "href": "#rpc-account_balance",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_balance\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_balance\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"balance\": \"<string>\",\n    \"receivable\": \"<string>\"\n  }\n}",
+      "search": "account_balance Read balance and receivable state for one account. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_balance\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n} {\n  \"result\": {\n    \"balance\": \"<string>\",\n    \"receivable\": \"<string>\"\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "accounts_balances",
       "summary": "Read balances and receivables for several accounts.",
       "href": "#rpc-accounts_balances",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"accounts_balances\",\n  \"params\": {\n    \"accounts\": [\n      \"<account>\"\n    ]\n  },\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"accounts_balances\",\n  \"params\": {\n    \"accounts\": [\n      \"<account>\"\n    ]\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"balances\": {\n      \"<key>\": {\n        \"balance\": \"<string>\",\n        \"receivable\": \"<string>\"\n      }\n    },\n    \"errors\": {\n      \"<key>\": \"<string>\"\n    }\n  }\n}",
+      "search": "accounts_balances Read balances and receivables for several accounts. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"accounts_balances\",\n  \"params\": {\n    \"accounts\": [\n      \"<account>\"\n    ]\n  },\n  \"id\": 1\n} {\n  \"result\": {\n    \"balances\": {\n      \"<key>\": {\n        \"balance\": \"<string>\",\n        \"receivable\": \"<string>\"\n      }\n    },\n    \"errors\": {\n      \"<key>\": \"<string>\"\n    }\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "account_history",
       "summary": "Read account history.",
       "href": "#rpc-account_history",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_history\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_history\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"account\": \"<string>\",\n    \"history\": [\n      \"<value>\"\n    ]\n  }\n}",
+      "search": "account_history Read account history. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"account_history\",\n  \"params\": {\n    \"account\": \"<account>\"\n  },\n  \"id\": 1\n} {\n  \"result\": {\n    \"account\": \"<string>\",\n    \"history\": [\n      \"<value>\"\n    ]\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "block_info",
-      "summary": "Read block metadata and cementing status for confirmation fallback.",
+      "summary": "Read block metadata and whether the block is cemented.",
       "href": "#rpc-block_info",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_info\",\n  \"params\": {\n    \"hash\": \"<hash>\"\n  },\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_info\",\n  \"params\": {\n    \"hash\": \"<hash>\"\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"amount\": \"<string>\",\n    \"balance\": \"<string>\",\n    \"block\": {\n      \"<key>\": \"<value>\"\n    },\n    \"block_account\": \"<string>\",\n    \"confirmed\": \"<boolean>\",\n    \"hash\": \"<string>\",\n    \"height\": \"<string>\",\n    \"subtype\": \"<string>\"\n  }\n}",
+      "search": "block_info Read block metadata and whether the block is cemented. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"block_info\",\n  \"params\": {\n    \"hash\": \"<hash>\"\n  },\n  \"id\": 1\n} {\n  \"result\": {\n    \"amount\": \"<string>\",\n    \"balance\": \"<string>\",\n    \"block\": {\n      \"<key>\": \"<value>\"\n    },\n    \"block_account\": \"<string>\",\n    \"confirmed\": \"<boolean>\",\n    \"hash\": \"<string>\",\n    \"height\": \"<string>\",\n    \"subtype\": \"<string>\"\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "blocks_info",
       "summary": "Read metadata for several blocks.",
       "href": "#rpc-blocks_info",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"blocks_info\",\n  \"params\": {\n    \"hashes\": [\n      \"<hash>\"\n    ]\n  },\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"blocks_info\",\n  \"params\": {\n    \"hashes\": [\n      \"<hash>\"\n    ]\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"blocks\": {\n      \"<key>\": {\n        \"amount\": \"<string>\",\n        \"balance\": \"<string>\",\n        \"block\": {\n          \"<key>\": \"<value>\"\n        },\n        \"block_account\": \"<string>\",\n        \"confirmed\": \"<boolean>\",\n        \"hash\": \"<string>\",\n        \"height\": \"<string>\",\n        \"subtype\": \"<string>\"\n      }\n    }\n  }\n}",
+      "search": "blocks_info Read metadata for several blocks. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"blocks_info\",\n  \"params\": {\n    \"hashes\": [\n      \"<hash>\"\n    ]\n  },\n  \"id\": 1\n} {\n  \"result\": {\n    \"blocks\": {\n      \"<key>\": {\n        \"amount\": \"<string>\",\n        \"balance\": \"<string>\",\n        \"block\": {\n          \"<key>\": \"<value>\"\n        },\n        \"block_account\": \"<string>\",\n        \"confirmed\": \"<boolean>\",\n        \"hash\": \"<string>\",\n        \"height\": \"<string>\",\n        \"subtype\": \"<string>\"\n      }\n    }\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "process",
-      "summary": "Submit a precomputed block and return its hash for confirmation correlation.",
+      "summary": "Submit a precomputed block and return its hash.",
       "href": "#rpc-process",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"process\",\n  \"params\": {\n    \"block\": \"<block>\"\n  },\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"process\",\n  \"params\": {\n    \"block\": \"<block>\"\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"hash\": \"<string>\"\n  }\n}",
+      "search": "process Submit a precomputed block and return its hash. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"process\",\n  \"params\": {\n    \"block\": \"<block>\"\n  },\n  \"id\": 1\n} {\n  \"result\": {\n    \"hash\": \"<string>\"\n  }\n}"
     },
     {
       "kind": "rpc",
       "name": "rpc.discover",
-      "summary": "Return this OpenRPC document.",
+      "summary": "Return the OpenRPC document.",
       "href": "#rpc-rpc-discover",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"rpc.discover\",\n  \"params\": {},\n  \"id\": 1\n}"
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"rpc.discover\",\n  \"params\": {},\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"<key>\": \"<value>\"\n  }\n}",
+      "search": "rpc.discover Return the OpenRPC document. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"rpc.discover\",\n  \"params\": {},\n  \"id\": 1\n} {\n  \"result\": {\n    \"<key>\": \"<value>\"\n  }\n}"
     },
     {
       "kind": "event",
       "name": "nano.confirmation",
-      "summary": "A cemented block confirmation observed from the configured Nano profile.",
+      "summary": "A block from the configured Nano profile has been cemented.",
       "href": "#event-nano-confirmation",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"nano.confirmation\",\n  \"params\": {\n    \"account\": \"nano_sender...\",\n    \"block\": {\n      \"link_as_account\": \"nano_new_account...\",\n      \"subtype\": \"send\",\n      \"type\": \"state\"\n    },\n    \"confirmation_type\": \"active_quorum\",\n    \"destination\": \"nano_new_account...\",\n    \"hash\": \"ABC123\",\n    \"profile\": \"nano-node/V28.2\",\n    \"subtype\": \"send\"\n  }\n}"
+      "event": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"nano.confirmation\",\n  \"params\": {\n    \"account\": \"nano_sender...\",\n    \"block\": {\n      \"link_as_account\": \"nano_new_account...\",\n      \"subtype\": \"send\",\n      \"type\": \"state\"\n    },\n    \"confirmation_type\": \"active_quorum\",\n    \"destination\": \"nano_new_account...\",\n    \"hash\": \"ABC123\",\n    \"profile\": \"nano-node/V28.2\",\n    \"subtype\": \"send\"\n  }\n}",
+      "search": "nano.confirmation A block from the configured Nano profile has been cemented. {\"jsonrpc\":\"2.0\",\"method\":\"nano.confirmation\",\"params\":{\"account\":\"nano_sender...\",\"block\":{\"link_as_account\":\"nano_new_account...\",\"subtype\":\"send\",\"type\":\"state\"},\"confirmation_type\":\"active_quorum\",\"destination\":\"nano_new_account...\",\"hash\":\"ABC123\",\"profile\":\"nano-node/V28.2\",\"subtype\":\"send\"}}"
     },
     {
       "kind": "event",
       "name": "nano.stream_reset",
-      "summary": "Stream continuity was lost or changed; reconcile before continuing.",
+      "summary": "The stream lost continuity. Reconcile before processing more events.",
       "href": "#event-nano-stream_reset",
-      "example": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"nano.stream_reset\",\n  \"params\": {\n    \"profile\": \"nano-node/V28.2\",\n    \"reason\": \"replay_unavailable\",\n    \"reconcile\": \"Query authoritative Nano RPC state before applying new confirmations\"\n  }\n}"
+      "event": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"nano.stream_reset\",\n  \"params\": {\n    \"profile\": \"nano-node/V28.2\",\n    \"reason\": \"replay_unavailable\",\n    \"reconcile\": \"Query authoritative Nano RPC state before applying new confirmations\"\n  }\n}",
+      "search": "nano.stream_reset The stream lost continuity. Reconcile before processing more events. {\"jsonrpc\":\"2.0\",\"method\":\"nano.stream_reset\",\"params\":{\"profile\":\"nano-node/V28.2\",\"reason\":\"replay_unavailable\",\"reconcile\":\"Query authoritative Nano RPC state before applying new confirmations\"}}"
     }
   ]
 }

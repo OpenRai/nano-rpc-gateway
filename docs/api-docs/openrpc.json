@@ -23,16 +23,18 @@
       },
       "UpstreamRejection": {
         "code": -32010,
-        "message": "Request rejected by upstream"
+        "message": "Request rejected by upstream; process responses include normalized reason and native_reason fields in error.data"
       }
     },
     "schemas": {
       "AccountBalanceResult": {
         "properties": {
           "balance": {
+            "description": "Confirmed account balance in RAW when include_only_confirmed is true.",
             "type": "string"
           },
           "receivable": {
+            "description": "Confirmed incoming amount not yet received, in RAW.",
             "type": "string"
           }
         },
@@ -80,12 +82,15 @@
       "AccountInfoResult": {
         "properties": {
           "balance": {
+            "description": "Current frontier balance in RAW. It can include unconfirmed state.",
             "type": "string"
           },
           "confirmation_height": {
+            "description": "Number of cemented blocks on the account chain.",
             "type": "string"
           },
           "confirmation_height_frontier": {
+            "description": "Cemented frontier hash reported by the node.",
             "oneOf": [
               {
                 "type": "string"
@@ -96,9 +101,11 @@
             ]
           },
           "confirmed_balance": {
+            "description": "Balance at confirmed_frontier in RAW.",
             "type": "string"
           },
           "confirmed_frontier": {
+            "description": "Hash of the cemented frontier. Use this hash for account-frontier confirmation status.",
             "oneOf": [
               {
                 "type": "string"
@@ -109,6 +116,7 @@
             ]
           },
           "frontier": {
+            "description": "Current frontier hash. It can be ahead of cemented state.",
             "oneOf": [
               {
                 "type": "string"
@@ -129,6 +137,7 @@
             ]
           },
           "opened": {
+            "description": "False when the account has not opened on the ledger.",
             "type": "boolean"
           },
           "representative_block": {
@@ -173,12 +182,14 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/AccountBalanceResult"
             },
+            "description": "Map from each requested account to its own balance and receivable values; this is not an aggregate.",
             "type": "object"
           },
           "errors": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Per-account native validation errors, when supplied by the node.",
             "type": "object"
           }
         },
@@ -229,22 +240,28 @@
       "BlockInfoResult": {
         "properties": {
           "amount": {
+            "description": "Block amount in RAW.",
             "type": "string"
           },
           "balance": {
+            "description": "Account balance after this block, in RAW.",
             "type": "string"
           },
           "block": {
             "additionalProperties": true,
+            "description": "Native block content.",
             "type": "object"
           },
           "block_account": {
+            "description": "Account that owns the block.",
             "type": "string"
           },
           "confirmed": {
+            "description": "True only when the node reports that the block is cemented.",
             "type": "boolean"
           },
           "hash": {
+            "description": "Queried block hash.",
             "type": "string"
           },
           "height": {
@@ -524,7 +541,7 @@
           "$ref": "#/components/schemas/AccountInfoResult"
         }
       },
-      "summary": "Read account frontier and representative state.",
+      "summary": "Read current and confirmed frontier state for one account.",
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -606,7 +623,7 @@
           "$ref": "#/components/schemas/AccountBalanceResult"
         }
       },
-      "summary": "Read an account balance.",
+      "summary": "Read balance and receivable state for one account.",
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -748,7 +765,7 @@
           "$ref": "#/components/schemas/BlockInfoResult"
         }
       },
-      "summary": "Read block metadata and cementing status for confirmation fallback.",
+      "summary": "Read block metadata and whether the block is cemented.",
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -833,7 +850,7 @@
           "$ref": "#/components/schemas/ProcessResult"
         }
       },
-      "summary": "Submit a precomputed block and return its hash for confirmation correlation.",
+      "summary": "Submit a precomputed block and return its hash.",
       "x-nano-capability": {
         "browser_safe": true,
         "name": "process",
@@ -854,7 +871,7 @@
           "type": "object"
         }
       },
-      "summary": "Return this OpenRPC document."
+      "summary": "Return the OpenRPC document."
     }
   ],
   "openrpc": "1.3.2",
@@ -869,7 +886,7 @@
       }
     }
   ],
-  "x-nano-artifact-sha256": "sha256:e146603a165244f5296668e572bdb61fbe5f9430af1adca5973b3d4840d27717",
+  "x-nano-artifact-sha256": "sha256:e76c156d052af25e4d4d2fa44cec27203687eea4befe0d41a54ee66c64c4c0f6",
   "x-nano-common-authentication": {
     "required": true
   },
