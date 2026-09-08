@@ -15,7 +15,11 @@
   --yellow: #ffd426;
   --dark: #1d2730;
 }
+@font-face { font-family: 'Montserrat'; src: url('fonts/montserrat-latin-wght-normal.woff2') format('woff2'); font-style: normal; font-weight: 100 900; font-display: swap; }
+@font-face { font-family: 'Open Sans'; src: url('fonts/open-sans-latin-wght-normal.woff2') format('woff2'); font-style: normal; font-weight: 300 800; font-display: swap; }
 body { background: #cfd8e2; color: var(--ink); }
+body, .copy { font-family: 'Open Sans', ui-sans-serif, system-ui, sans-serif; }
+h1, h2, h3, .brand, .tab, .kicker, .eyebrow, .search span { font-family: 'Montserrat', ui-sans-serif, system-ui, sans-serif; }
 header { background: #20214fee; color: #ffffff; border-color: #40457a; }
 .brand small, nav a { color: #d6e0eb; }
 .mark { background: var(--accent); color: #ffffff; }
@@ -41,9 +45,13 @@ a { color: var(--blue); }
 .copy { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px #20214f12; }
 .copy:hover { border-color: var(--accent); color: var(--blue); }
 pre { border-color: #303b78; background: var(--dark); color: var(--surface); box-shadow: 0 3px 10px #20214f18; }
+.hljs-attr, .hljs-property { color: #74c0fc; }
+.hljs-string { color: #63e6be; }
+.hljs-number, .hljs-literal { color: #ffd426; }
+.hljs-punctuation { color: #d6e0eb; }
 article, .examples, .example, pre { min-width: 0; }
 article { grid-template-columns: minmax(210px, .75fr) minmax(0, 1.5fr); align-items: start; gap: 20px 30px; margin: 16px 0; padding: 28px; border: 1px solid #c2ccd7; border-radius: 14px; background: var(--panel); box-shadow: 0 2px 7px #20214f12; }
-article h2 { margin: .3rem 0 1rem; }
+article h2 { margin: .3rem 0 1rem; font-family: 'Montserrat', ui-sans-serif, system-ui, sans-serif; }
 .entry-info p { margin: 0; color: var(--muted); }
 .examples { grid-column: auto; grid-row: auto; }
 @media(max-width:720px) { main { padding: 32px 16px 48px; border: 0; } .hero { padding: 28px 20px; } .tabs { padding: 0 4px; } .panel { padding: 0 12px 16px; } article { grid-template-columns: 1fr; padding: 20px; gap: 18px; } }
