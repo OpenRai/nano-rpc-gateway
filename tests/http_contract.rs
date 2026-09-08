@@ -35,7 +35,10 @@ async fn start_native_stub() -> String {
                 Some("block_info") => json!({"block_account":"nano_test", "amount":"0", "balance":"0", "height":"1", "contents":"{\"type\":\"state\"}"}),
                 Some("blocks_info") => json!({"blocks": {}}),
                 Some("process") if body["block"]["hash"] == "REJECT" => {
-                    json!({"error":"invalid block"})
+                    json!({"error":"Block signature is invalid"})
+                }
+                Some("process") if body["block"]["hash"] == "GAP" => {
+                    json!({"error":"Block has gap previous"})
                 }
                 Some("process") => json!({"hash":"A"}),
                 Some("work_generate") if body["hash"] == "FAIL" => {
@@ -824,7 +827,7 @@ async fn confirmation_stream_emits_reset_for_unknown_generation() {
 }
 
 #[tokio::test]
-async fn confirmation_stream_filters_accounts_for_replay_and_live_events() {
+async fn confirmation_stream_fresh_subscribers_filter_live_events_without_replaying_history() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     state
         .events
@@ -852,17 +855,6 @@ async fn confirmation_stream_filters_accounts_for_replay_and_live_events() {
         .expect("gateway response");
     let mut body = response.into_body();
 
-    let replay = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
-        .await
-        .expect("replay timeout")
-        .expect("replay frame")
-        .expect("replay data")
-        .into_data()
-        .expect("replay bytes");
-    let replay_text = String::from_utf8(replay.to_vec()).expect("replay text");
-    assert!(replay_text.contains("MATCH-REPLAY"));
-    assert!(!replay_text.contains("MISS-REPLAY"));
-
     state
         .events
         .publish(
@@ -887,6 +879,53 @@ async fn confirmation_stream_filters_accounts_for_replay_and_live_events() {
     let live_text = String::from_utf8(live.to_vec()).expect("live text");
     assert!(live_text.contains("MATCH-LIVE"));
     assert!(!live_text.contains("MISS-LIVE"));
+    assert!(!live_text.contains("MATCH-REPLAY"));
+}
+
+#[tokio::test]
+async fn confirmation_stream_fresh_subscriber_does_not_receive_historical_reset() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    state
+        .events
+        .publish(
+            "nano.stream_reset",
+            json!({"reason":"upstream_reconnected", "reconcile":"snapshot"}),
+        )
+        .await;
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/events/confirmations?accounts=nano_test")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state.clone())
+        .oneshot(request)
+        .await
+        .expect("gateway response");
+    let mut body = response.into_body();
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), body.frame())
+            .await
+            .is_err()
+    );
+
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account":"nano_test", "hash":"LIVE"}),
+        )
+        .await;
+    let live = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
+        .await
+        .expect("live timeout")
+        .expect("live frame")
+        .expect("live data")
+        .into_data()
+        .expect("live bytes");
+    let text = String::from_utf8(live.to_vec()).expect("live text");
+    assert!(text.contains("LIVE"));
+    assert!(!text.contains("nano.stream_reset"));
 }
 
 #[tokio::test]
@@ -1012,7 +1051,10 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
                     "confirmed_balance":"0", "confirmed_height":"1"
                 }),
                 Some("process") if body["block"]["hash"] == "REJECT" => {
-                    json!({"error":"invalid block"})
+                    json!({"error":"Block signature is invalid"})
+                }
+                Some("process") if body["block"]["hash"] == "GAP" => {
+                    json!({"error":"Block has gap previous"})
                 }
                 Some("process") => json!({"hash":"FLOW-HASH"}),
                 Some("accounts_balances") => json!({"balances": {
@@ -1189,6 +1231,40 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
         .expect("rejected process JSON");
     assert_eq!(rejected["error"]["code"], -32010);
     assert_eq!(rejected["error"]["data"]["kind"], "upstream_rejection");
+    assert_eq!(rejected["error"]["data"]["reason"], "invalid_signature");
+    assert_eq!(
+        rejected["error"]["data"]["native_reason"],
+        "Block signature is invalid"
+    );
+    assert_eq!(
+        rejected["error"]["message"],
+        "Process rejected: Invalid block signature"
+    );
+    let gap: Value = client
+        .post(format!("{base}/rpc"))
+        .bearer_auth(sign_paseto(
+            &json!({"aud":"nano-rpc-gateway","sub":"flow","scope":"common","exp":4_000_000_000u64}),
+            &signing_key,
+        ))
+        .json(&json!({
+            "jsonrpc":"2.0", "method":"process",
+            "params":{"block":{"type":"state","hash":"GAP"}}, "id":5
+        }))
+        .send()
+        .await
+        .expect("gap process request")
+        .json()
+        .await
+        .expect("gap process JSON");
+    assert_eq!(gap["error"]["data"]["reason"], "gap_previous");
+    assert_eq!(
+        gap["error"]["data"]["native_reason"],
+        "Block has gap previous"
+    );
+    assert_eq!(
+        gap["error"]["message"],
+        "Process rejected: Previous frontier does not match"
+    );
 
     let mut transcript = String::new();
     for _ in 0..8 {

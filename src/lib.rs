@@ -387,7 +387,7 @@ pub fn registry() -> Vec<MethodSpec> {
             scope: Scope::Base,
             params: "AccountInfoParams",
             result: "AccountInfoResult",
-            description: "Read account frontier and representative state.",
+            description: "Read current and confirmed frontier state for one account.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
@@ -403,7 +403,7 @@ pub fn registry() -> Vec<MethodSpec> {
             scope: Scope::Base,
             params: "AccountParams",
             result: "AccountBalanceResult",
-            description: "Read an account balance.",
+            description: "Read balance and receivable state for one account.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
@@ -427,7 +427,7 @@ pub fn registry() -> Vec<MethodSpec> {
             scope: Scope::Base,
             params: "BlockParams",
             result: "BlockInfoResult",
-            description: "Read block metadata and cementing status for confirmation fallback.",
+            description: "Read block metadata and whether the block is cemented.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
@@ -443,8 +443,7 @@ pub fn registry() -> Vec<MethodSpec> {
             scope: Scope::Common,
             params: "ProcessParams",
             result: "ProcessResult",
-            description:
-                "Submit a precomputed block and return its hash for confirmation correlation.",
+            description: "Submit a precomputed block and return its hash.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
@@ -520,12 +519,12 @@ fn event_registry() -> [EventSpec; 2] {
     [
         EventSpec {
             name: "nano.confirmation",
-            summary: "A cemented block confirmation observed from the configured Nano profile.",
+            summary: "A block from the configured Nano profile has been cemented.",
             params_schema: "ConfirmationParams",
         },
         EventSpec {
             name: "nano.stream_reset",
-            summary: "Stream continuity was lost or changed; reconcile before continuing.",
+            summary: "The stream lost continuity. Reconcile before processing more events.",
             params_schema: "StreamResetParams",
         },
     ]
@@ -628,6 +627,14 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
                 "result": {"balances": "per-account balance and receivable values"},
                 "when": "Seed state once, then refresh in one batch after a matching confirmation or stream reset; do not poll."
             },
+            "frontier_confirmation": {
+                "method": "account_info",
+                "current_frontier_field": "result.frontier",
+                "cemented_frontier_field": "result.confirmed_frontier",
+                "status_method": "block_info",
+                "status_field": "result.confirmed",
+                "when": "Use this flow when the known account frontier, rather than a submitted block hash, is the starting point. Query the current frontier and inspect its confirmation status."
+            },
             "not_provided": ["balance aggregation", "derived balance events", "vote events", "telemetry events"]
         },
         "x-http-response": {
@@ -715,7 +722,7 @@ fn build_openrpc_document(
     if include_discovery {
         methods.push(json!({
             "name": "rpc.discover",
-            "summary": "Return this OpenRPC document.",
+            "summary": "Return the OpenRPC document.",
             "params": [],
             "result": {"name": "result", "schema": {"type": "object", "properties": {}, "additionalProperties": true}}
         }));
@@ -731,15 +738,15 @@ fn build_openrpc_document(
             "EmptyParams":{"type":"object","properties":{},"additionalProperties":false},
             "VersionResult":{"type":"object","required":["rpc_version"],"properties":{"rpc_version":{"type":"string"}}},
             "BlockCountResult":{"type":"object","required":["count","unchecked","cemented"],"properties":{"count":{"type":"string"},"unchecked":{"type":"string"},"cemented":{"type":"string"}}},
-            "AccountBalanceResult":{"type":"object","required":["balance","receivable"],"properties":{"balance":{"type":"string"},"receivable":{"type":"string"}}},
-            "AccountsBalancesResult":{"type":"object","required":["balances"],"properties":{"balances":{"type":"object","additionalProperties":{"$ref":"#/components/schemas/AccountBalanceResult"}},"errors":{"type":"object","additionalProperties":{"type":"string"}}}},
+            "AccountBalanceResult":{"type":"object","required":["balance","receivable"],"properties":{"balance":{"type":"string","description":"Confirmed account balance in RAW when include_only_confirmed is true."},"receivable":{"type":"string","description":"Confirmed incoming amount not yet received, in RAW."}}},
+            "AccountsBalancesResult":{"type":"object","required":["balances"],"properties":{"balances":{"type":"object","description":"Map from each requested account to its own balance and receivable values; this is not an aggregate.","additionalProperties":{"$ref":"#/components/schemas/AccountBalanceResult"}},"errors":{"type":"object","description":"Per-account native validation errors, when supplied by the node.","additionalProperties":{"type":"string"}}}},
             "AccountHistoryResult":{"type":"object","required":["account","history"],"properties":{"account":{"type":"string"},"history":{"type":"array","items":true}}},
-            "AccountInfoResult":{"type":"object","required":["opened","frontier","open_block","representative_block","balance","confirmed_frontier","confirmed_balance","confirmation_height","confirmation_height_frontier"],"properties":{"opened":{"type":"boolean"},"frontier":{"oneOf":[{"type":"string"},{"type":"null"}]},"open_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"representative_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"balance":{"type":"string"},"confirmed_frontier":{"oneOf":[{"type":"string"},{"type":"null"}]},"confirmed_balance":{"type":"string"},"confirmation_height":{"type":"string"},"confirmation_height_frontier":{"oneOf":[{"type":"string"},{"type":"null"}]}}},
+            "AccountInfoResult":{"type":"object","required":["opened","frontier","open_block","representative_block","balance","confirmed_frontier","confirmed_balance","confirmation_height","confirmation_height_frontier"],"properties":{"opened":{"type":"boolean","description":"False when the account has not opened on the ledger."},"frontier":{"oneOf":[{"type":"string"},{"type":"null"}],"description":"Current frontier hash. It can be ahead of cemented state."},"open_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"representative_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"balance":{"type":"string","description":"Current frontier balance in RAW. It can include unconfirmed state."},"confirmed_frontier":{"oneOf":[{"type":"string"},{"type":"null"}],"description":"Hash of the cemented frontier. Use this hash for account-frontier confirmation status."},"confirmed_balance":{"type":"string","description":"Balance at confirmed_frontier in RAW."},"confirmation_height":{"type":"string","description":"Number of cemented blocks on the account chain."},"confirmation_height_frontier":{"oneOf":[{"type":"string"},{"type":"null"}],"description":"Cemented frontier hash reported by the node."}}},
             "ReceivableEntry":{"type":"object","required":["source","hash","amount"],"properties":{"source":{"type":"string"},"hash":{"type":"string"},"amount":{"type":"string"}}},
             "ReceivableResult":{"type":"array","items":{"$ref":"#/components/schemas/ReceivableEntry"}},
             "AccountHistoryParams":{"type":"object","required":["account"],"properties":{"account":{"type":"string","minLength":1},"count":{"type":"integer","minimum":1}}},
             "BlockParams":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string","minLength":1}}},
-            "BlockInfoResult":{"type":"object","required":["hash","block_account","amount","balance","height","subtype","confirmed","block"],"properties":{"hash":{"type":"string"},"block_account":{"type":"string"},"amount":{"type":"string"},"balance":{"type":"string"},"height":{"type":"string"},"subtype":{"type":"string"},"confirmed":{"type":"boolean"},"block":{"type":"object","additionalProperties":true}}},
+            "BlockInfoResult":{"type":"object","required":["hash","block_account","amount","balance","height","subtype","confirmed","block"],"properties":{"hash":{"type":"string","description":"Queried block hash."},"block_account":{"type":"string","description":"Account that owns the block."},"amount":{"type":"string","description":"Block amount in RAW."},"balance":{"type":"string","description":"Account balance after this block, in RAW."},"height":{"type":"string"},"subtype":{"type":"string"},"confirmed":{"type":"boolean","description":"True only when the node reports that the block is cemented."},"block":{"type":"object","description":"Native block content.","additionalProperties":true}}},
             "BlocksParams":{"type":"object","required":["hashes"],"properties":{"hashes":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
             "BlocksInfoResult":{"type":"object","required":["blocks"],"properties":{"blocks":{"type":"object","additionalProperties":{"$ref":"#/components/schemas/BlockInfoResult"}}}},
             "ProcessParams":{"type":"object","required":["block"],"properties":{"block":{"type":"object","additionalProperties":true}}}, "ProcessResult":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string"}}},
@@ -750,7 +757,7 @@ fn build_openrpc_document(
             "Unauthorized": {"code": -32001, "message": "Unauthorized"},
             "UpstreamFailure": {"code": -32000, "message": "Upstream request failed"},
             "UpstreamIndeterminate": {"code": -32002, "message": "Upstream outcome is indeterminate"},
-            "UpstreamRejection": {"code": -32010, "message": "Request rejected by upstream"}
+            "UpstreamRejection": {"code": -32010, "message": "Request rejected by upstream; process responses include normalized reason and native_reason fields in error.data"}
         }}, "x-nano-profile": profile
     })
 }
@@ -961,12 +968,14 @@ impl NativeClient {
                     "upstream rate limit exceeded".into(),
                 ));
             }
+            let native_reason = native_error_reason(error);
             if action == "process" {
                 tracing::warn!(
                     action,
                     upstream = %self.label,
                     upstream_url = %redacted_endpoint,
                     authorization,
+                    reason = %native_reason,
                     "native upstream rejected a process request"
                 );
             } else {
@@ -975,11 +984,11 @@ impl NativeClient {
                     upstream = %self.label,
                     upstream_url = %redacted_endpoint,
                     authorization,
-                    reason = %error,
+                    reason = %native_reason,
                     "native upstream rejected request"
                 );
             }
-            return Err(GatewayError::UpstreamRejected(error.to_string()));
+            return Err(GatewayError::UpstreamRejected(native_reason));
         }
         Ok(value)
     }
@@ -1038,6 +1047,114 @@ fn log_upstream_error(protocol: &str, endpoint: &str, error: &str) {
     );
 }
 
+#[derive(Clone, Copy)]
+struct ProcessRejectionReason {
+    code: &'static str,
+    message: &'static str,
+}
+
+fn classify_process_rejection(native_error: &str) -> ProcessRejectionReason {
+    let error = native_error.to_ascii_lowercase();
+    let matches = |patterns: &[&str]| patterns.iter().any(|pattern| error.contains(pattern));
+
+    if matches(&["signature", "bad signature"]) {
+        return ProcessRejectionReason {
+            code: "invalid_signature",
+            message: "Invalid block signature",
+        };
+    }
+    if matches(&[
+        "work is",
+        "work threshold",
+        "insufficient work",
+        "proof of work",
+        "invalid work",
+        "bad work",
+        "pow",
+    ]) {
+        return ProcessRejectionReason {
+            code: "insufficient_work",
+            message: "Insufficient proof of work",
+        };
+    }
+    if matches(&["gap previous"]) {
+        return ProcessRejectionReason {
+            code: "gap_previous",
+            message: "Previous frontier does not match",
+        };
+    }
+    if matches(&["gap source"]) {
+        return ProcessRejectionReason {
+            code: "gap_source",
+            message: "Referenced source block is unavailable",
+        };
+    }
+    if matches(&["fork"]) {
+        return ProcessRejectionReason {
+            code: "fork",
+            message: "Block conflicts with the account frontier",
+        };
+    }
+    if matches(&["unreceivable", "not receivable"]) {
+        return ProcessRejectionReason {
+            code: "unreceivable",
+            message: "Referenced receive is not receivable",
+        };
+    }
+    if matches(&["negative spend"]) {
+        return ProcessRejectionReason {
+            code: "negative_spend",
+            message: "Block spends more than the account balance",
+        };
+    }
+    if matches(&["balance mismatch"]) {
+        return ProcessRejectionReason {
+            code: "balance_mismatch",
+            message: "Block balance does not match the account state",
+        };
+    }
+    if matches(&["representative"]) {
+        return ProcessRejectionReason {
+            code: "invalid_representative",
+            message: "Invalid representative",
+        };
+    }
+    if matches(&["not opened", "account not found", "account is not open"]) {
+        return ProcessRejectionReason {
+            code: "account_not_opened",
+            message: "Account is not opened",
+        };
+    }
+    if matches(&["already exists", "already processed", "duplicate"]) {
+        return ProcessRejectionReason {
+            code: "already_exists",
+            message: "Block already exists",
+        };
+    }
+    if matches(&["queue", "too many blocks", "full"]) {
+        return ProcessRejectionReason {
+            code: "processor_busy",
+            message: "Node block processor is busy",
+        };
+    }
+    if matches(&["old"]) {
+        return ProcessRejectionReason {
+            code: "old_block",
+            message: "Block is older than the account frontier",
+        };
+    }
+    if matches(&["invalid"]) {
+        return ProcessRejectionReason {
+            code: "invalid_block",
+            message: "Block failed Nano validation",
+        };
+    }
+    ProcessRejectionReason {
+        code: "node_rejected",
+        message: "Node rejected the block",
+    }
+}
+
 fn is_rate_limited_error(error: &Value) -> bool {
     match error {
         Value::Number(value) => value.as_u64() == Some(429),
@@ -1051,6 +1168,13 @@ fn is_rate_limited_error(error: &Value) -> bool {
         }
         _ => false,
     }
+}
+
+fn native_error_reason(error: &Value) -> String {
+    error
+        .as_str()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| error.to_string())
 }
 
 fn upstream_label(url: &Url) -> String {
@@ -1515,12 +1639,26 @@ impl AppState {
                 // expose only the stable public error contract.
                 RpcResponse::err(request.id, -32000, "Upstream request failed")
             }
-            Err(GatewayError::UpstreamRejected(_)) => RpcResponse::err_with_data(
-                request.id,
-                -32010,
-                "Request rejected by upstream",
-                Some(json!({"kind":"upstream_rejection"})),
-            ),
+            Err(GatewayError::UpstreamRejected(reason)) => {
+                let process_reason = if spec.name == "process" {
+                    Some(classify_process_rejection(&reason))
+                } else {
+                    None
+                };
+                let message = process_reason
+                    .map(|reason| format!("Process rejected: {}", reason.message))
+                    .unwrap_or_else(|| "Request rejected by upstream".into());
+                let data = process_reason
+                    .map(|classified| {
+                        json!({
+                            "kind":"upstream_rejection",
+                            "reason":classified.code,
+                            "native_reason":reason
+                        })
+                    })
+                    .unwrap_or_else(|| json!({"kind":"upstream_rejection"}));
+                RpcResponse::err_with_data(request.id, -32010, message, Some(data))
+            }
             Err(GatewayError::UpstreamIndeterminate(_)) => RpcResponse::err_with_data(
                 request.id,
                 -32002,
@@ -2196,7 +2334,14 @@ async fn sse_handler(
     let cursor = headers
         .get("last-event-id")
         .and_then(|value| value.to_str().ok());
-    let (reset, replay) = state.events.replay(cursor).await;
+    // A fresh subscriber needs a live circuit, not this process's old control
+    // events. Replay is exclusively a cursor-resumption feature; otherwise a
+    // historical nano.stream_reset would make compliant clients immediately
+    // tear down and reopen the newly established stream.
+    let (reset, replay) = match cursor {
+        Some(cursor) => state.events.replay(Some(cursor)).await,
+        None => (false, Vec::new()),
+    };
     if cursor.is_some() {
         if reset {
             state.metrics.replay_misses.fetch_add(1, Ordering::Relaxed);
@@ -2621,6 +2766,15 @@ mod tests {
         assert_eq!(
             tracking["state_refresh"]["params"]["include_only_confirmed"],
             true
+        );
+        assert_eq!(tracking["frontier_confirmation"]["method"], "account_info");
+        assert_eq!(
+            tracking["frontier_confirmation"]["current_frontier_field"],
+            "result.frontier"
+        );
+        assert_eq!(
+            tracking["frontier_confirmation"]["status_method"],
+            "block_info"
         );
         assert_eq!(
             tracking["not_provided"],
