@@ -100,7 +100,6 @@ fn test_config(node_rpc_url: String) -> Config {
         allow_control: false,
         auth_public_key: None,
         enable_discovery: true,
-        enable_inspector: false,
         log_rpc: false,
         cors_origins: vec![
             "http://127.0.0.1:8080".into(),
@@ -708,29 +707,6 @@ async fn asyncapi_endpoint_documents_receive_only_sse_messages() {
 }
 
 #[tokio::test]
-async fn embedded_inspector_is_opt_in_and_uses_gateway_endpoints() {
-    let mut config = test_config(start_native_stub().await);
-    config.enable_inspector = true;
-    let state = AppState::new(config).expect("state");
-    let request = axum::http::Request::builder()
-        .method("GET")
-        .uri("/inspector/")
-        .body(axum::body::Body::empty())
-        .expect("request");
-    let response = app(state).oneshot(request).await.expect("gateway response");
-    assert_eq!(response.status(), axum::http::StatusCode::OK);
-    let body = response
-        .into_body()
-        .collect()
-        .await
-        .expect("inspector body")
-        .to_bytes();
-    let text = String::from_utf8(body.to_vec()).expect("inspector html");
-    assert!(text.contains("Nano RPC Inspector"));
-    assert!(text.contains("fetch(\"/rpc\""));
-}
-
-#[tokio::test]
 async fn confirmation_stream_uses_event_stream_content_type() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let request = axum::http::Request::builder()
@@ -1136,7 +1112,6 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
                 .encode(signing_key.verifying_key().to_bytes()),
         ),
         enable_discovery: true,
-        enable_inspector: false,
         log_rpc: false,
         cors_origins: vec![
             "http://127.0.0.1:8080".into(),

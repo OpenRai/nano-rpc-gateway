@@ -8,7 +8,6 @@ allow_work: false
 allow_control: false
 auth_public_key: null
 enable_discovery: true
-enable_inspector: false
 cors_origins: []
 tls_cert: null
 tls_key: null

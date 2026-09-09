@@ -18,7 +18,7 @@ use axum::{
     http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
-        Html, IntoResponse, Response,
+        IntoResponse, Response,
     },
     routing::{get, post},
     Json, Router,
@@ -48,7 +48,6 @@ allow_work: false
 allow_control: false
 auth_public_key: null
 enable_discovery: true
-enable_inspector: false
 log_rpc: false
 cors_origins:
   - "http://127.0.0.1:8080"
@@ -80,8 +79,6 @@ pub struct Config {
     pub auth_public_key: Option<String>,
     #[serde(default = "default_discovery")]
     pub enable_discovery: bool,
-    #[serde(default)]
-    pub enable_inspector: bool,
     /// Emit safe JSON-RPC and SSE lifecycle diagnostics.
     #[serde(default)]
     pub log_rpc: bool,
@@ -2027,8 +2024,6 @@ pub fn app(state: AppState) -> Router {
         .route("/rpc", post(rpc_handler))
         .route("/openrpc.json", get(openrpc_handler))
         .route("/asyncapi.json", get(asyncapi_handler))
-        .route("/inspector", get(inspector_handler))
-        .route("/inspector/", get(inspector_handler))
         .route("/events/confirmations", get(sse_handler))
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/readyz", get(ready_handler))
@@ -2174,25 +2169,6 @@ async fn asyncapi_handler(State(state): State<AppState>) -> Response {
     Json(asyncapi_document(
         &state.config.profile,
         &state.gateway_url(),
-    ))
-    .into_response()
-}
-
-async fn inspector_handler(State(state): State<AppState>) -> Response {
-    if !state.config.enable_inspector {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    Html(format!(
-        r#"<!doctype html><html><head><meta charset="utf-8"><title>Nano RPC Inspector</title>
-<style>body{{font:16px system-ui;margin:2rem;max-width:72rem}}textarea{{width:100%;height:10rem;font:14px monospace}}button{{padding:.5rem 1rem}}pre{{background:#f5f5f5;padding:1rem;overflow:auto}}</style>
-</head><body><h1>Nano RPC Inspector</h1><p>Profile: <code>{}</code></p>
-<label>Request JSON</label><textarea id="request">{{"jsonrpc":"2.0","method":"version","params":{{}},"id":1}}</textarea>
-<p><button id="send">Send request</button></p><pre id="response"></pre>
-<script>
-const output=document.getElementById("response");
-document.getElementById("send").onclick=async()=>{{try{{const body=JSON.parse(document.getElementById("request").value);const r=await fetch("/rpc",{{method:"POST",headers:{{"content-type":"application/json"}},body:JSON.stringify(body)}});output.textContent=JSON.stringify(await r.json(),null,2)}}catch(e){{output.textContent=String(e)}}}};
-</script></body></html>"#,
-        state.config.profile
     ))
     .into_response()
 }
@@ -2467,13 +2443,29 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
         };
         if let Err(error) = socket
             .send(Message::Text(
-                json!({"action":"subscribe","topic":"confirmation"}).to_string(),
+                json!({"action":"subscribe","topic":"confirmation","ack":true}).to_string(),
             ))
             .await
         {
             log_upstream_error("websocket", &ws_url, &error.to_string());
             return Err(GatewayError::UpstreamUnavailable(error.to_string()));
         }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(message) = socket.next().await {
+                let message = message.map_err(|error| GatewayError::UpstreamTransport(error.to_string()))?;
+                if let Message::Text(text) = message {
+                    if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                        if value.get("error").is_some() {
+                            return Err(GatewayError::UpstreamUnavailable("confirmation subscription rejected".into()));
+                        }
+                        if value.get("ack").and_then(Value::as_str) == Some("subscribe") {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            Err(GatewayError::UpstreamUnavailable("closed before subscription acknowledgement".into()))
+        }).await.map_err(|_| GatewayError::UpstreamUnavailable("confirmation subscription acknowledgement timed out".into()))??;
         connected = true;
         let reconnecting = state.upstream_seen.swap(true, Ordering::Relaxed);
         if reconnecting {
@@ -2494,7 +2486,21 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
                 }),
             )
             .await;
-        while let Some(message) = socket.next().await {
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
+        heartbeat.tick().await;
+        let mut awaiting_pong = false;
+        loop {
+            let message = tokio::select! {
+                message = socket.next() => match message { Some(message) => message, None => break },
+                _ = heartbeat.tick() => {
+                    if awaiting_pong {
+                        return Err(GatewayError::UpstreamUnavailable("websocket heartbeat timed out".into()));
+                    }
+                    socket.send(Message::Ping(vec![])).await.map_err(|error| GatewayError::UpstreamTransport(error.to_string()))?;
+                    awaiting_pong = true;
+                    continue;
+                }
+            };
             let message = match message {
                 Ok(message) => message,
                 Err(error) => {
@@ -2503,6 +2509,7 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
                 }
             };
             let value = match message {
+                Message::Pong(_) => { awaiting_pong = false; continue; }
                 Message::Text(text) => serde_json::from_str::<Value>(text.as_ref()),
                 Message::Binary(bytes) => {
                     let Ok(text) = std::str::from_utf8(bytes.as_ref()) else {
@@ -3628,6 +3635,73 @@ node_ws_urls:
         assert_eq!(events[1].data["profile"], "nano-node/V28.2");
         assert_eq!(events[2].event, "nano.stream_reset");
         assert_eq!(events[2].data["reason"], "upstream_closed");
+    }
+
+    #[tokio::test]
+    async fn websocket_unacknowledged_subscription_never_becomes_ready() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("client");
+            let mut socket = accept_async(stream).await.expect("handshake");
+            let request = socket
+                .next()
+                .await
+                .expect("subscribe")
+                .expect("frame")
+                .into_text()
+                .expect("text");
+            assert_eq!(
+                serde_json::from_str::<Value>(&request).expect("json")["ack"],
+                true
+            );
+            tokio::time::sleep(Duration::from_secs(6)).await;
+        });
+        let state = AppState::new(Config {
+            node_ws_urls: vec![format!("ws://{address}")],
+            ..Config::default()
+        })
+        .expect("state");
+        let bridge = tokio::spawn(run_ws_bridge(state.clone()));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert!(tokio::time::timeout(Duration::from_secs(6), bridge)
+            .await
+            .expect("bounded timeout")
+            .expect("task")
+            .is_err());
+        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert!(state.events.replay(None).await.1.is_empty());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn websocket_subscription_rejection_keeps_readiness_false() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("client");
+            let mut socket = accept_async(stream).await.expect("handshake");
+            socket.next().await.expect("subscribe").expect("frame");
+            socket
+                .send(Message::Text(
+                    json!({"error":"subscription rejected"}).to_string(),
+                ))
+                .await
+                .expect("reject");
+        });
+        let state = AppState::new(Config {
+            node_ws_urls: vec![format!("ws://{address}")],
+            ..Config::default()
+        })
+        .expect("state");
+        assert!(run_ws_bridge(state.clone()).await.is_err());
+        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        server.await.expect("server");
     }
 
     #[tokio::test]

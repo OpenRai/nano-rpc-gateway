@@ -27,7 +27,9 @@ tabs, global search, deep links, and raw OpenRPC/AsyncAPI downloads. Run
 `make docs-install`, then `make docs-generate`, `make docs-validate`, or
 `make docs-preview`. `make docs-model-smoke` proves the AsyncAPI contract can
 produce typed event models without shipping a subscriber library from this
-gateway.
+gateway. The reference links to the hosted OpenRPC Playground and AsyncAPI
+Studio; those tools load the published JSON contracts and handle live
+exploration separately from this site.
 
 Run `cargo run -- serve`; a missing `gateway.yaml` is created with safe
 defaults (`127.0.0.1:8090` for the gateway, leaving Nano's conventional native
@@ -48,10 +50,10 @@ lifecycle diagnostics remain opt-in: set `log_rpc: true` in the config or run
 upstream status/duration, and subscription filter counts, but never request
 parameters, account/hash values, tokens, or provider credentials.
 
-For local inspection, enable `enable_inspector` in the gateway config and open
-`/inspector/`. The embedded inspector is dynamically pointed at the gateway's
-own `/openrpc.json` and `/rpc` endpoints. It is disabled by default;
-external OpenRPC tools can still consume the same schema.
+For live RPC testing, open the OpenRPC Playground link in the generated
+reference and configure its endpoint from the published schema. For event
+contract inspection, open the AsyncAPI Studio link. The gateway ships schemas
+and event streams, not a bespoke inspector UI.
 
 Operational deployment and isolation guidance is in [OPERATIONS.md](OPERATIONS.md);
 the reproducible request harness is [scripts/benchmark.sh](scripts/benchmark.sh),

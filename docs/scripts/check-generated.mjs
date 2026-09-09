@@ -21,7 +21,11 @@ for (const required of [
   'href="#rpc-account_info"',
   'href="#rpc-block_info"',
   'Result shape',
-  'It does not report votes or election progress.'
+  'It does not report votes or election progress.',
+  'OpenRPC Playground',
+  'AsyncAPI Studio',
+  'schemaUrl=',
+  'studio.asyncapi.com/?url='
 ]) {
   if (!page.includes(required)) {
     console.error(`Generated documentation is missing required account-tracking guidance: ${required}`)

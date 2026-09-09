@@ -64,7 +64,7 @@ fi
   printf 'node_ws_urls:\n  - "%s"\n' "$node_ws_url"
   printf 'profile: "nano-node/V28.2"\n'
   printf 'allow_work: false\nallow_control: false\n'
-  printf 'auth_public_key: null\nenable_discovery: true\nenable_inspector: false\nlog_rpc: false\n'
+  printf 'auth_public_key: null\nenable_discovery: true\nlog_rpc: false\n'
   printf 'cors_origins:\n  - "http://127.0.0.1:8080"\n  - "http://localhost:8080"\n  - "https://playground.open-rpc.org"\n'
   printf 'tls_cert: null\ntls_key: null\n'
 } >"$config_file"

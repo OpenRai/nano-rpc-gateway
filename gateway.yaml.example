@@ -16,7 +16,6 @@ allow_work: false
 allow_control: false
 auth_public_key: null
 enable_discovery: true
-enable_inspector: false
 log_rpc: false
 cors_origins:
   - "http://127.0.0.1:8080"

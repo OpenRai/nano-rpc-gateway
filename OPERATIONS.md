@@ -27,7 +27,6 @@ hash, request ID, token, or raw error text is used as a metric label.
    policy and PASETO verification key have been reviewed. Set
    `require_common_auth: false` only when the public Common profile is
    intentional; this makes `process` callable without a token.
-   Set `enable_inspector: true` only for trusted operator/developer access.
    Upstream selection and failure events are always emitted for RPC and
    WebSocket transports. They include a redacted `upstream_url` so failover,
    disconnect, and upstream-error records identify the affected provider.
@@ -53,10 +52,11 @@ After `nano.stream_reset`, reconcile state with JSON-RPC before applying new
 events. Rotate PASETO signing keys by replacing the configured verification
 key and issuing short-lived tokens; the gateway stores no token revocation DB.
 
-For local inspection, set `enable_inspector: true` and open `/inspector/`.
-The embedded inspector reads the same runtime `/openrpc.json` document and
-sends requests to the gateway's `/rpc` endpoint. It is disabled by default;
-external OpenRPC tooling remains useful when the route is not enabled.
+For live RPC testing, use the OpenRPC Playground link in the generated
+reference and configure its endpoint from the published schema. Use AsyncAPI
+Studio to inspect the receive-only event contract. The gateway exposes the
+machine-readable contracts and runtime endpoints; it does not embed a custom
+inspector UI.
 
 For a disposable compatibility smoke on a Docker host, run `make devnet-smoke`.
 It pulls the pinned official V28.2 image, starts it with the runtime Dev-network

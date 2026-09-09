@@ -1,0 +1,47 @@
+name: deploy-api-docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: docs
+      - run: npm run generate
+        working-directory: docs
+      - run: npm run check
+        working-directory: docs
+      - run: |
+          rm -rf "$RUNNER_TEMP/pages"
+          mkdir -p "$RUNNER_TEMP/pages/api-docs"
+          cp -R docs/api-docs/. "$RUNNER_TEMP/pages/api-docs/"
+          printf '<!doctype html><meta http-equiv="refresh" content="0; url=api-docs/">' > "$RUNNER_TEMP/pages/index.html"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/pages
+      - id: deployment
+        uses: actions/deploy-pages@v4
