@@ -32,8 +32,9 @@ hash, request ID, token, or raw error text is used as a metric label.
    disconnect, and upstream-error records identify the affected provider.
    For temporary request diagnostics, set `log_rpc: true` or pass `--log-rpc`
    to `serve`. This additionally emits structured `rpc_request`,
-   `rpc_upstream_response`, `sse_subscription_opened`, and
-   `sse_subscription_closed` events. These detailed events do not log request
+   `rpc_upstream_response`, `sse_session_created`, `sse_session_closed`,
+   `upstream_ws_connecting`, and `upstream_ws_connected` events. These detailed
+   events do not log request
    parameters, account or hash values, tokens, or upstream credentials. Keep
    detailed diagnostics disabled for normal production operation.
 4. Start `nano-rpc-gateway serve --config /etc/nano-rpc-gateway/gateway.yaml`.

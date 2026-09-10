@@ -457,6 +457,9 @@ async fn websocket_bridge_uses_standby_after_primary_disconnects() {
             ))
             .await
             .expect("ack");
+        socket.send(tokio_tungstenite::tungstenite::Message::Text(
+            json!({"topic":"confirmation","message":{"hash":"STANDBY", "account":"nano_sender", "block":{"type":"state","subtype":"send","link_as_account":"nano_player"}}}).to_string()
+        )).await.expect("standby confirmation");
         socket.close(None).await.expect("close");
     });
     let native = start_native_stub().await;
@@ -466,12 +469,27 @@ async fn websocket_bridge_uses_standby_after_primary_disconnects() {
         ..test_config("http://127.0.0.1:1".into())
     })
     .expect("state");
+    let request = axum::http::Request::builder()
+        .uri("/events/confirmations?accounts=nano_player")
+        .body(axum::body::Body::empty()).expect("SSE request");
+    let mut body = app(state.clone()).oneshot(request).await.expect("SSE response").into_body();
     assert!(nano_rpc_gateway::run_ws_bridge(state.clone())
         .await
         .is_err());
-    assert_eq!(state.native.active_index(), 1);
+    assert_eq!(state.native.active_index(), 0);
     assert!(nano_rpc_gateway::run_ws_bridge(state.clone()).await.is_ok());
     server.await.expect("ws server");
+    let transcript = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        let mut transcript = String::new();
+        while !transcript.contains("STANDBY") {
+            let bytes = body.frame().await.expect("frame").expect("data").into_data().expect("bytes");
+            transcript.push_str(std::str::from_utf8(bytes.as_ref()).expect("text"));
+        }
+        transcript
+    }).await.expect("filtered standby confirmation");
+    assert!(transcript.contains("nano_player"));
+    assert_eq!(state.native.call("account_info", &json!({"account":"nano_test"})).await.expect("RPC remains healthy")["frontier"], "A");
+    assert_eq!(state.native.active_index(), 0);
 }
 
 #[tokio::test]

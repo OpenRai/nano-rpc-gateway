@@ -32,7 +32,14 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::sync::{broadcast, Mutex};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        client::IntoClientRequest,
+        http::{header::USER_AGENT, HeaderValue as TungsteniteHeaderValue, Request as TungsteniteRequest},
+        Message,
+    },
+};
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use url::Url;
@@ -154,9 +161,9 @@ impl Config {
     }
 
     pub fn validate(self) -> Result<Self, GatewayError> {
-        if self.node_rpc_urls.is_empty() || self.node_rpc_urls.len() != self.node_ws_urls.len() {
+        if self.node_rpc_urls.is_empty() || self.node_ws_urls.is_empty() {
             return Err(GatewayError::InvalidRequest(
-                "node_rpc_urls and node_ws_urls must be non-empty parallel lists".into(),
+                "node_rpc_urls and node_ws_urls must each be non-empty".into(),
             ));
         }
         for endpoint in &self.node_rpc_urls {
@@ -1206,6 +1213,11 @@ fn native_request_body(action: &str, params: &Value) -> serde_json::Map<String, 
 }
 
 const UPSTREAM_COOLDOWN: Duration = Duration::from_secs(15);
+const WEBSOCKET_USER_AGENT: &str = "Mozilla/5.0 (compatible; nano-rpc-gateway/0.1)";
+/// An acknowledged WebSocket that never forwards confirmations is unusable.
+/// The upstream subscription is unfiltered, so a healthy public network must
+/// produce a confirmation within this bound.
+const CONFIRMATION_DELIVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct NativeRouter {
@@ -1308,26 +1320,7 @@ impl NativeRouter {
         }
     }
 
-    pub async fn active_ws_url(&self, ws_urls: &[String]) -> Result<(usize, String), GatewayError> {
-        let start = self.active_index();
-        let now = Instant::now();
-        let unhealthy = self.unhealthy_until.lock().await.clone();
-        for offset in 0..ws_urls.len() {
-            let index = (start + offset) % ws_urls.len();
-            if unhealthy[index] <= now {
-                return Ok((index, ws_urls[index].clone()));
-            }
-        }
-        Err(GatewayError::UpstreamUnavailable(
-            "all upstreams cooling down".into(),
-        ))
-    }
 
-    pub async fn mark_ws_unhealthy(&self, index: usize) {
-        self.unhealthy_until.lock().await[index] = Instant::now() + UPSTREAM_COOLDOWN;
-        let next = (index + 1) % self.clients.len();
-        self.active.store(next, Ordering::Release);
-    }
 }
 
 fn validate_upstream_url(endpoint: &str, schemes: &[&str]) -> Result<(), GatewayError> {
@@ -1347,6 +1340,17 @@ fn validate_upstream_url(endpoint: &str, schemes: &[&str]) -> Result<(), Gateway
         ));
     }
     Ok(())
+}
+
+fn websocket_connect_request(endpoint: &str) -> Result<TungsteniteRequest<()>, GatewayError> {
+    let mut request = endpoint
+        .into_client_request()
+        .map_err(|error| GatewayError::UpstreamUnavailable(error.to_string()))?;
+    request.headers_mut().insert(
+        USER_AGENT,
+        TungsteniteHeaderValue::from_static(WEBSOCKET_USER_AGENT),
+    );
+    Ok(request)
 }
 
 #[derive(Clone)]
@@ -1459,6 +1463,9 @@ pub struct AppState {
     pub upstream_ready: Arc<AtomicBool>,
     upstream_seen: Arc<AtomicBool>,
     ws_selected: Arc<Mutex<Option<String>>>,
+    // RPC and WebSocket providers have independent availability and ordering.
+    ws_active: Arc<AtomicUsize>,
+    ws_unhealthy_until: Arc<Mutex<Vec<Instant>>>,
 }
 
 #[derive(Clone, Default)]
@@ -1505,11 +1512,11 @@ impl Drop for ActiveStreamGuard {
         if self.log_rpc {
             tracing::info!(
                 target: "nano_rpc_gateway::sse",
-                event = "sse_subscription_closed",
+                event = "sse_session_closed",
                 duration_ms = self.started.elapsed().as_millis() as u64,
                 account_filter_count = self.account_filter_count,
                 hash_filter_count = self.hash_filter_count,
-                "SSE subscription closed"
+                "SSE session closed"
             );
         }
     }
@@ -1540,6 +1547,27 @@ fn reset_sse_event(reason: &str, profile: &str) -> Event {
 }
 
 impl AppState {
+    async fn active_ws_url(&self) -> Result<(usize, String), GatewayError> {
+        let ws_urls = &self.config.node_ws_urls;
+        let start = self.ws_active.load(Ordering::Acquire);
+        let now = Instant::now();
+        let unhealthy = self.ws_unhealthy_until.lock().await.clone();
+        for offset in 0..ws_urls.len() {
+            let index = (start + offset) % ws_urls.len();
+            if unhealthy[index] <= now {
+                return Ok((index, ws_urls[index].clone()));
+            }
+        }
+        Err(GatewayError::UpstreamUnavailable(
+            "all upstreams cooling down".into(),
+        ))
+    }
+
+    async fn mark_ws_unhealthy(&self, index: usize) {
+        self.ws_unhealthy_until.lock().await[index] = Instant::now() + UPSTREAM_COOLDOWN;
+        let next = (index + 1) % self.config.node_ws_urls.len();
+        self.ws_active.store(next, Ordering::Release);
+    }
     pub fn new(config: Config) -> Result<Self, GatewayError> {
         let config = config.validate()?;
         let verifying_key = config
@@ -1551,6 +1579,8 @@ impl AppState {
             native: NativeRouter::with_response_logging(&config.node_rpc_urls, config.log_rpc)?,
             events: EventHub::new(EVENT_HISTORY_CAPACITY),
             metrics: Metrics::default(),
+            ws_active: Arc::new(AtomicUsize::new(0)),
+            ws_unhealthy_until: Arc::new(Mutex::new(vec![Instant::now(); config.node_ws_urls.len()])),
             config,
             verifying_key,
             upstream_ready: Arc::new(AtomicBool::new(false)),
@@ -2336,13 +2366,18 @@ async fn sse_handler(
     if log_rpc {
         tracing::info!(
             target: "nano_rpc_gateway::sse",
-            event = "sse_subscription_opened",
+            event = "sse_session_created",
             account_filter_count,
             hash_filter_count,
             last_event_id_present = cursor.is_some(),
             replay_reset = reset,
             replay_event_count = replay.len(),
-            "SSE subscription opened"
+            upstream_ws_circuit = if state.upstream_ready.load(Ordering::Acquire) {
+                "existing"
+            } else {
+                "establishing"
+            },
+            "SSE session created"
         );
     }
     let mut receiver = state.events.subscribe();
@@ -2394,19 +2429,25 @@ async fn sse_handler(
 }
 
 pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
+    run_ws_bridge_with_confirmation_liveness(state, CONFIRMATION_DELIVERY_TIMEOUT).await
+}
+
+async fn run_ws_bridge_with_confirmation_liveness(
+    state: AppState,
+    confirmation_liveness: Duration,
+) -> Result<(), GatewayError> {
     state.upstream_ready.store(false, Ordering::Relaxed);
     let mut connected = false;
     let mut ws_index = None;
     let mut selected_ws_url = None;
     let result = async {
         let (index, ws_url) = match state
-            .native
-            .active_ws_url(&state.config.node_ws_urls)
+            .active_ws_url()
             .await
         {
             Ok(selection) => selection,
             Err(error) => {
-                let index = state.native.active_index();
+                let index = state.ws_active.load(Ordering::Acquire);
                 if let Some(ws_url) = state.config.node_ws_urls.get(index) {
                     log_upstream_error("websocket", ws_url, &error.to_string());
                 }
@@ -2434,12 +2475,24 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
             log_upstream_error("websocket", &ws_url, &error.to_string());
             return Err(error);
         }
-        let (mut socket, _) = match connect_async(&ws_url).await {
-            Ok(connection) => connection,
-            Err(error) => {
+        if state.config.log_rpc {
+            tracing::info!(
+                target: "nano_rpc_gateway::upstream",
+                event = "upstream_ws_connecting",
+                protocol = "websocket",
+                circuit = "new",
+                upstream_url = %redact_upstream_url(&ws_url),
+                "establishing upstream WebSocket circuit"
+            );
+        }
+        let request = websocket_connect_request(&ws_url)?;
+        let (mut socket, _) = match tokio::time::timeout(Duration::from_secs(5), connect_async(request)).await {
+            Ok(Ok(connection)) => connection,
+            Ok(Err(error)) => {
                 log_upstream_error("websocket", &ws_url, &error.to_string());
                 return Err(GatewayError::UpstreamUnavailable(error.to_string()));
             }
+            Err(_) => return Err(GatewayError::UpstreamUnavailable("websocket connection timed out".into())),
         };
         if let Err(error) = socket
             .send(Message::Text(
@@ -2474,6 +2527,17 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
                 .upstream_reconnects
                 .fetch_add(1, Ordering::Relaxed);
         }
+        if state.config.log_rpc {
+            tracing::info!(
+                target: "nano_rpc_gateway::upstream",
+                event = "upstream_ws_connected",
+                protocol = "websocket",
+                circuit = "new",
+                reconnecting,
+                upstream_url = %redact_upstream_url(&ws_url),
+                "upstream WebSocket circuit connected"
+            );
+        }
         state.upstream_ready.store(true, Ordering::Relaxed);
         state
             .events
@@ -2489,9 +2553,14 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
         heartbeat.tick().await;
         let mut awaiting_pong = false;
+        let confirmation_deadline = tokio::time::sleep(confirmation_liveness);
+        tokio::pin!(confirmation_deadline);
         loop {
             let message = tokio::select! {
                 message = socket.next() => match message { Some(message) => message, None => break },
+                _ = &mut confirmation_deadline => {
+                    return Err(GatewayError::UpstreamUnavailable("confirmation delivery timed out".into()));
+                }
                 _ = heartbeat.tick() => {
                     if awaiting_pong {
                         return Err(GatewayError::UpstreamUnavailable("websocket heartbeat timed out".into()));
@@ -2510,6 +2579,7 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
             };
             let value = match message {
                 Message::Pong(_) => { awaiting_pong = false; continue; }
+                Message::Close(_) => break,
                 Message::Text(text) => serde_json::from_str::<Value>(text.as_ref()),
                 Message::Binary(bytes) => {
                     let Ok(text) = std::str::from_utf8(bytes.as_ref()) else {
@@ -2521,6 +2591,9 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
             };
             if let Ok(value) = value {
                 if let Some(event) = normalize_confirmation(&value, &state.config.profile) {
+                    confirmation_deadline
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + confirmation_liveness);
                     state.events.publish("nano.confirmation", event).await;
                 }
             }
@@ -2529,8 +2602,11 @@ pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
     }
     .await;
     state.upstream_ready.store(false, Ordering::Relaxed);
-    if let Some(index) = ws_index.filter(|_| result.is_err()) {
-        state.native.mark_ws_unhealthy(index).await;
+    if let Some(index) = ws_index {
+        state.mark_ws_unhealthy(index).await;
+    }
+    if let (Err(error), Some(url)) = (&result, &selected_ws_url) {
+        log_upstream_error("websocket", url, &error.to_string());
     }
     if connected {
         if result.is_ok() {
@@ -3398,6 +3474,15 @@ node_ws_urls:
         assert_eq!(event["hash"], "A");
         assert_eq!(event["profile"], "nano-node/V28.2");
     }
+
+    #[test]
+    fn websocket_handshake_uses_a_browser_compatible_user_agent() {
+        let request = websocket_connect_request("wss://gateway.test/websocket").expect("request");
+        assert_eq!(
+            request.headers().get(USER_AGENT).and_then(|value| value.to_str().ok()),
+            Some(WEBSOCKET_USER_AGENT)
+        );
+    }
     #[test]
     fn confirmation_filter_matches_only_requested_accounts() {
         let item = NanoEvent {
@@ -3551,6 +3636,100 @@ node_ws_urls:
             data: json!({"reason":"upstream_disconnect"}),
         };
         assert!(event_matches_accounts(&item, Some(&["nano_other".into()])));
+    }
+
+    #[test]
+    fn rpc_and_websocket_pools_can_have_different_lengths() {
+        let config = Config {
+            node_ws_urls: vec!["ws://127.0.0.1:1".into(), "ws://127.0.0.1:2".into()],
+            ..Config::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[tokio::test]
+    async fn websocket_failure_does_not_change_rpc_selection_or_health() {
+        let state = AppState::new(Config {
+            node_rpc_urls: vec!["http://127.0.0.1:1".into(), "http://127.0.0.1:2".into()],
+            node_ws_urls: vec!["ws://127.0.0.1:1".into(), "ws://127.0.0.1:2".into()],
+            ..Config::default()
+        }).expect("state");
+        assert!(run_ws_bridge(state.clone()).await.is_err());
+        assert_eq!(state.native.active_index(), 0);
+        assert!(state.native.unhealthy_until.lock().await.iter().all(|until| *until <= Instant::now()));
+    }
+
+    #[tokio::test]
+    async fn rpc_failure_does_not_change_websocket_selection_or_health() {
+        let state = AppState::new(Config {
+            node_rpc_urls: vec!["http://127.0.0.1:1".into(), "http://127.0.0.1:2".into()],
+            node_ws_urls: vec!["ws://127.0.0.1:3".into()],
+            ..Config::default()
+        }).expect("state");
+        assert!(state.native.call("version", &json!({})).await.is_err());
+        assert_eq!(state.active_ws_url().await.expect("WS unaffected"), (0, "ws://127.0.0.1:3".into()));
+        state.mark_ws_unhealthy(0).await;
+        assert!(state.active_ws_url().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn websocket_missing_pong_clears_readiness_and_rotates_only_ws() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("client");
+            let mut socket = accept_async(stream).await.expect("handshake");
+            socket.next().await.expect("subscribe").expect("frame");
+            socket.send(Message::Text(json!({"ack":"subscribe"}).to_string())).await.expect("ack");
+            // Hold the TCP connection open without reading/responding to ping.
+            tokio::time::sleep(Duration::from_secs(35)).await;
+            drop(socket);
+        });
+        let state = AppState::new(Config {
+            node_ws_urls: vec![format!("ws://{address}"), "ws://127.0.0.1:1".into()],
+            ..Config::default()
+        }).expect("state");
+        let error = tokio::time::timeout(
+            Duration::from_secs(34),
+            run_ws_bridge_with_confirmation_liveness(state.clone(), Duration::from_secs(40)),
+        )
+            .await.expect("bounded heartbeat").expect_err("missing pong");
+        assert!(error.to_string().contains("heartbeat timed out"));
+        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert_eq!(state.active_ws_url().await.expect("standby").0, 1);
+        assert_eq!(state.native.active_index(), 0);
+        let events = state.events.replay(None).await.1;
+        assert_eq!(events.last().expect("disconnect reset").data["reason"], "upstream_disconnected");
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn websocket_silent_after_ack_rotates_only_ws() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = listener.local_addr().expect("listener address");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("client");
+            let mut socket = accept_async(stream).await.expect("handshake");
+            socket.next().await.expect("subscribe").expect("frame");
+            socket.send(Message::Text(json!({"ack":"subscribe"}).to_string())).await.expect("ack");
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        });
+        let state = AppState::new(Config {
+            node_rpc_urls: vec!["http://127.0.0.1:1".into(), "http://127.0.0.1:2".into()],
+            node_ws_urls: vec![format!("ws://{address}"), "ws://127.0.0.1:1".into()],
+            ..Config::default()
+        }).expect("state");
+
+        let error = run_ws_bridge_with_confirmation_liveness(state.clone(), Duration::from_millis(50))
+            .await
+            .expect_err("silent upstream must fail delivery liveness");
+
+        assert!(error.to_string().contains("confirmation delivery timed out"));
+        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert_eq!(state.active_ws_url().await.expect("standby").0, 1);
+        assert_eq!(state.native.active_index(), 0);
+        assert_eq!(state.events.replay(None).await.1.last().expect("disconnect reset").data["reason"], "upstream_disconnected");
+        server.abort();
     }
 
     #[tokio::test]
@@ -3731,7 +3910,7 @@ node_ws_urls:
             }
         });
         let config = Config {
-            node_ws_urls: vec![format!("ws://{address}")],
+            node_ws_urls: vec![format!("ws://{address}"), format!("ws://{address}")],
             ..Config::default()
         };
         let state = AppState::new(config).expect("state");
