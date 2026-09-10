@@ -40,6 +40,8 @@ jobs:
           cp -R docs/api-docs/. "$RUNNER_TEMP/pages/api-docs/"
           printf '<!doctype html><meta http-equiv="refresh" content="0; url=api-docs/">' > "$RUNNER_TEMP/pages/index.html"
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ runner.temp }}/pages
