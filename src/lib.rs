@@ -41,7 +41,11 @@ use tokio_tungstenite::{
     },
 };
 use tower::limit::ConcurrencyLimitLayer;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    limit::RequestBodyLimitLayer,
+    trace::TraceLayer,
+};
 use url::Url;
 
 const DEFAULT_CONFIG: &str = r#"listen: "127.0.0.1:8090"
@@ -57,9 +61,8 @@ auth_public_key: null
 enable_discovery: true
 log_rpc: false
 cors_origins:
-  - "http://127.0.0.1:8080"
-  - "http://localhost:8080"
-  - "https://playground.open-rpc.org"
+  - "*"
+public_url: null
 "#;
 const EVENT_HISTORY_CAPACITY: usize = 256;
 const MAX_ACCOUNT_FILTER_BYTES: usize = 4096;
@@ -91,6 +94,9 @@ pub struct Config {
     pub log_rpc: bool,
     #[serde(default = "default_cors_origins")]
     pub cors_origins: Vec<String>,
+    /// Full public JSON-RPC endpoint advertised in the OpenRPC and AsyncAPI documents.
+    /// Set this when a proxy or tunnel fronts the gateway; omit it to advertise `listen`.
+    pub public_url: Option<String>,
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
 }
@@ -114,11 +120,7 @@ fn default_discovery() -> bool {
     true
 }
 fn default_cors_origins() -> Vec<String> {
-    vec![
-        "http://127.0.0.1:8080".into(),
-        "http://localhost:8080".into(),
-        "https://playground.open-rpc.org".into(),
-    ]
+    vec!["*".into()]
 }
 
 impl Default for Config {
@@ -180,6 +182,11 @@ impl Config {
         for origin in &self.cors_origins {
             HeaderValue::from_str(origin).map_err(|error| {
                 GatewayError::InvalidRequest(format!("invalid CORS origin: {error}"))
+            })?;
+        }
+        if let Some(public_url) = &self.public_url {
+            validate_upstream_url(public_url, &["http", "https"]).map_err(|error| {
+                GatewayError::InvalidRequest(format!("invalid public_url: {error}"))
             })?;
         }
         Ok(self)
@@ -1731,6 +1738,9 @@ impl AppState {
         verify_paseto(token, key, scope).is_ok()
     }
     fn gateway_url(&self) -> String {
+        if let Some(public_url) = &self.config.public_url {
+            return public_url.clone();
+        }
         let scheme = if self.config.tls_cert.is_some() && self.config.tls_key.is_some() {
             "https"
         } else {
@@ -2042,8 +2052,14 @@ pub fn app(state: AppState) -> Router {
         .iter()
         .filter_map(|origin| HeaderValue::from_str(origin).ok())
         .collect::<Vec<_>>();
+    // A wildcard must go through `AllowOrigin::any`; `AllowOrigin::list` panics on `*`.
+    let allow_origin = if origins.iter().any(|origin| origin == "*") {
+        AllowOrigin::any()
+    } else {
+        AllowOrigin::list(origins)
+    };
     let cors = CorsLayer::new()
-        .allow_origin(origins)
+        .allow_origin(allow_origin)
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([
             header::AUTHORIZATION,
@@ -2778,6 +2794,21 @@ pub fn playground_url(gateway_url: &str, schema_url: Option<&str>, local: bool) 
 mod tests {
     use super::*;
     use tokio_tungstenite::accept_async;
+
+    #[test]
+    fn shipped_example_config_parses_and_validates() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("gateway.yaml.example");
+        let contents = std::fs::read_to_string(&path).expect("gateway.yaml.example is readable");
+        let config: Config = serde_yaml::from_str(&contents).expect("example config parses");
+        config.clone().validate().expect("example config validates");
+        assert_eq!(config.cors_origins, vec!["*".to_owned()]);
+        assert!(config.public_url.is_none());
+        assert!(config.require_common_auth);
+        assert!(!config.allow_work);
+        assert!(!config.allow_control);
+    }
+
     #[test]
     fn registry_methods_have_unique_names() {
         let methods = registry();

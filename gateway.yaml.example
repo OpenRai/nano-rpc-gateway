@@ -17,9 +17,17 @@ allow_control: false
 auth_public_key: null
 enable_discovery: true
 log_rpc: false
+# Browser origins allowed to call this gateway. CORS is a browser-enforced policy,
+# not access control: every endpoint here is already reachable by any non-browser
+# client, so the default stays permissive and this list is not a security boundary.
+# `*` is incompatible with cookie-based credentials; Authorization-header tokens are
+# unaffected. Narrow this to the known web origins once a deployment has them.
 cors_origins:
-  - "http://127.0.0.1:8080"
-  - "http://localhost:8080"
-  - "https://playground.open-rpc.org"
+  - "*"
+# Full public JSON-RPC endpoint advertised in /openrpc.json and /asyncapi.json.
+# Set this whenever a tunnel or reverse proxy fronts the gateway, so the published
+# contracts advertise the reachable address instead of the local bind address.
+# Leave null to derive the advertised URL from `listen`.
+public_url: null
 tls_cert: null
 tls_key: null

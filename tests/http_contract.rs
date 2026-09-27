@@ -1,12 +1,18 @@
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use axum::{http::StatusCode, routing::post, Json, Router};
+use axum::{
+    http::{header, StatusCode},
+    routing::post,
+    Json, Router,
+};
 use base64::Engine;
 use futures_util::future::join_all;
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
-use nano_rpc_gateway::{app, generate_signing_key, sign_paseto, AppState, Config, NativeRouter};
+use nano_rpc_gateway::{
+    app, asyncapi_document, generate_signing_key, sign_paseto, AppState, Config, NativeRouter,
+};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tower::ServiceExt;
@@ -106,6 +112,7 @@ fn test_config(node_rpc_url: String) -> Config {
             "http://localhost:8080".into(),
             "https://playground.open-rpc.org".into(),
         ],
+        public_url: None,
         tls_cert: None,
         tls_key: None,
     }
@@ -692,6 +699,95 @@ async fn discovery_can_be_disabled_without_removing_static_schema() {
 }
 
 #[tokio::test]
+async fn openrpc_advertises_configured_public_url() {
+    let mut config = test_config(start_native_stub().await);
+    config.public_url = Some("https://gw.example.test/rpc".into());
+    let state = AppState::new(config).expect("state");
+
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/openrpc.json")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    let document = response
+        .into_body()
+        .collect()
+        .await
+        .expect("schema body")
+        .to_bytes();
+    let document: Value = serde_json::from_slice(&document).expect("schema JSON");
+    assert_eq!(document["servers"][0]["url"], "https://gw.example.test/rpc");
+    assert_eq!(
+        document["servers"][0]["variables"]["gatewayUrl"]["default"],
+        "https://gw.example.test/rpc"
+    );
+}
+
+#[tokio::test]
+async fn openrpc_advertises_listen_when_public_url_is_absent() {
+    let config = test_config(start_native_stub().await);
+    let listen = config.listen.clone();
+    let state = AppState::new(config).expect("state");
+
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/openrpc.json")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    let document = response
+        .into_body()
+        .collect()
+        .await
+        .expect("schema body")
+        .to_bytes();
+    let document: Value = serde_json::from_slice(&document).expect("schema JSON");
+    assert_eq!(document["servers"][0]["url"], format!("http://{listen}/rpc"));
+}
+
+#[tokio::test]
+async fn asyncapi_advertises_configured_public_url_host() {
+    let document = asyncapi_document("nano-node/test", "https://gw.example.test/rpc");
+
+    assert_eq!(document["servers"]["gateway"]["host"], "gw.example.test");
+    assert_eq!(document["servers"]["gateway"]["protocol"], "https");
+    assert_eq!(
+        document["servers"]["gateway"]["pathname"],
+        "/events/confirmations"
+    );
+}
+
+#[test]
+fn public_url_must_be_an_absolute_http_url() {
+    for invalid in ["not-a-url", "ftp://gw.example.test/rpc", "/rpc"] {
+        let config: Config = serde_yaml::from_str(&format!(
+            "listen: \"127.0.0.1:8090\"\n\
+             node_rpc_urls: [\"http://127.0.0.1:7076\"]\n\
+             node_ws_urls: [\"ws://127.0.0.1:7078\"]\n\
+             public_url: \"{invalid}\"\n"
+        ))
+        .expect("config parses");
+        assert!(
+            config.validate().is_err(),
+            "public_url {invalid} should be rejected"
+        );
+    }
+}
+
+#[test]
+fn public_url_defaults_to_absent_so_listen_is_advertised() {
+    let config: Config = serde_yaml::from_str(
+        "listen: \"127.0.0.1:8090\"\n\
+         node_rpc_urls: [\"http://127.0.0.1:7076\"]\n\
+         node_ws_urls: [\"ws://127.0.0.1:7078\"]\n",
+    )
+    .expect("config parses");
+    assert!(config.public_url.is_none());
+    assert!(config.validate().is_ok());
+}
+
+#[tokio::test]
 async fn asyncapi_endpoint_documents_receive_only_sse_messages() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let request = axum::http::Request::builder()
@@ -755,7 +851,7 @@ async fn confirmation_stream_rejects_unbounded_account_filters() {
 }
 
 #[tokio::test]
-async fn cors_allows_playground_origins_but_not_arbitrary_origins() {
+async fn cors_restricts_origins_to_the_configured_list() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let allowed = axum::http::Request::builder()
         .method("GET")
@@ -783,6 +879,48 @@ async fn cors_allows_playground_origins_but_not_arbitrary_origins() {
         .headers()
         .get("access-control-allow-origin")
         .is_none());
+}
+
+#[tokio::test]
+async fn cors_allows_any_origin_when_wildcard_is_configured() {
+    let mut config = test_config(start_native_stub().await);
+    config.cors_origins = vec!["*".into()];
+    let state = AppState::new(config).expect("state");
+
+    for origin in ["https://playground.open-rpc.org", "https://unexpected.example"] {
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/health")
+            .header("origin", origin)
+            .body(axum::body::Body::empty())
+            .expect("request");
+        let response = app(state.clone()).oneshot(request).await.expect("response");
+        assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    }
+}
+
+#[tokio::test]
+async fn wildcard_cors_still_preflights_the_declared_methods_and_headers() {
+    let mut config = test_config(start_native_stub().await);
+    config.cors_origins = vec!["*".into()];
+    let state = AppState::new(config).expect("state");
+
+    let preflight = axum::http::Request::builder()
+        .method("OPTIONS")
+        .uri("/rpc")
+        .header("origin", "https://unexpected.example")
+        .header("access-control-request-method", "POST")
+        .header("access-control-request-headers", "content-type,last-event-id")
+        .body(axum::body::Body::empty())
+        .expect("preflight");
+    let response = app(state).oneshot(preflight).await.expect("preflight response");
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    let allowed_headers = response.headers()["access-control-allow-headers"]
+        .to_str()
+        .expect("allowed headers")
+        .to_ascii_lowercase();
+    assert!(allowed_headers.contains("content-type"));
+    assert!(allowed_headers.contains("last-event-id"));
 }
 
 #[tokio::test]
@@ -1136,6 +1274,7 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
             "http://localhost:8080".into(),
             "https://playground.open-rpc.org".into(),
         ],
+        public_url: None,
         tls_cert: None,
         tls_key: None,
     };

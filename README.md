@@ -38,6 +38,18 @@ generation is disabled until a PASETO public key and explicit work policy are
 configured. Common methods, including `process`, require PASETO by default;
 set `require_common_auth: false` for an intentionally public Common profile.
 
+Browser CORS defaults to `*`. The gateway is a public read surface and CORS is
+browser-enforced rather than access control, since non-browser clients already
+reach every endpoint regardless of the allowlist. Narrow `cors_origins` to the
+known web origins for a deployment that has them; a wildcard does not weaken
+`Authorization`-header authentication.
+
+`public_url` declares the externally reachable JSON-RPC endpoint and is what
+`/openrpc.json` and `/asyncapi.json` advertise under `servers`. Set it whenever
+a reverse proxy or tunnel fronts the gateway, including when TLS terminates
+upstream of it. Left unset, the advertised URL is derived from the local bind
+address, which is correct only for a directly reachable listener.
+
 For the tmux development launcher, use `make dev-tmux`. It starts with the
 local credential-free `gateway.dev.yaml` (created from built-in safe defaults);
 select a local credentialed

@@ -17,9 +17,12 @@ hash, request ID, token, or raw error text is used as a metric label.
    Nanswap accepts `https://nodes.nanswap.com/XNO?api_key=${NANSWAP_COM_API_KEY}` and
    `wss://nodes.nanswap.com/ws/?ticker=XNO&api_key=${NANSWAP_COM_API_KEY}`;
    Nano.to accepts `https://${NANO_TO_API_KEY}:@rpc.nano.to/` for HTTP and
-   `wss://ws.nano.to` for WebSocket. The gateway loads an optional `.env` beside
+   `wss://ws.nano.to` for WebSocket.    The gateway loads an optional `.env` beside
    the chosen configuration file, expands `${NAME}` values before parsing YAML,
    and lets explicitly exported environment variables take precedence.
+   Expansion is textual over the whole file, so a `${NAME}` inside a comment is
+   expanded too, and an unset variable is a hard startup error rather than an
+   empty string. Comment out a placeholder instead of naming an undefined one.
    The gateway strips Nano.to URL userinfo before issuing the request and sends
    it as empty-password Basic authentication. Keep these key-bearing values in
    a deployment secret or untracked local config, never in a committed example.
@@ -37,8 +40,25 @@ hash, request ID, token, or raw error text is used as a metric label.
    events do not log request
    parameters, account or hash values, tokens, or upstream credentials. Keep
    detailed diagnostics disabled for normal production operation.
-4. Start `nano-rpc-gateway serve --config /etc/nano-rpc-gateway/gateway.yaml`.
-5. Check `/health`, `/readyz`, and `/metrics` before routing traffic. `/health`
+4. Set `public_url` to the externally reachable JSON-RPC endpoint whenever a
+   reverse proxy or tunnel fronts the gateway. It is what `/openrpc.json` and
+   `/asyncapi.json` advertise as `servers`, so published contracts, generated
+   clients, and the hosted OpenRPC and AsyncAPI tools resolve the reachable
+   address. It must be an absolute `http`/`https` URL, and it is independent of
+   `listen`, so TLS may terminate upstream of the gateway. Left null, the
+   advertised URL is derived from `listen` and the local TLS setting, which is
+   correct only for a directly reachable loopback listener.
+5. Review `cors_origins`. The default `*` is deliberate: CORS is enforced by
+   browsers, and every endpoint is already callable by any non-browser client,
+   so the allowlist is not an access-control boundary. It exists to stop a page
+   on an unrelated origin from using a visitor's browser as a relay. Narrow it
+   to the known web origins for a deployment that has them, and expect a
+   browser to report a bare CORS failure with a `200` status when an origin is
+   missing — the status code alone does not indicate success. A wildcard is
+   incompatible with cookie credentials; `Authorization`-header tokens are
+   unaffected, so PASETO authentication keeps working under `*`.
+6. Start `nano-rpc-gateway serve --config /etc/nano-rpc-gateway/gateway.yaml`.
+7. Check `/health`, `/readyz`, and `/metrics` before routing traffic. `/health`
    is process liveness; `/readyz` returns 200 only after the native
    confirmation subscription is connected and returns 503 while it is down or
    reconnecting. The metrics endpoint exposes the same state as
@@ -46,7 +66,9 @@ hash, request ID, token, or raw error text is used as a metric label.
 
 For TLS, provide both `tls_cert` and `tls_key`. When either is absent the
 development server uses HTTP; terminate TLS at a trusted reverse proxy for
-production if certificate management is external to the sidecar.
+production if certificate management is external to the sidecar. When TLS
+terminates upstream, set `public_url` to the `https` address so the published
+contracts do not advertise the loopback listener.
 
 `/events/confirmations` is bounded gateway-local replay, not durable storage.
 After `nano.stream_reset`, reconcile state with JSON-RPC before applying new
