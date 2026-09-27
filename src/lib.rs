@@ -2199,14 +2199,12 @@ async fn openrpc_handler(State(state): State<AppState>) -> Response {
         &state.gateway_url(),
         state.config.require_common_auth,
     );
-    let digest = document["x-nano-artifact-sha256"]
-        .as_str()
-        .map(str::to_owned);
+    // The validator must identify this representation. The profile artifact digest
+    // stays constant across public_url and cors changes, so it cannot be reused here.
+    let bytes = serde_json::to_vec(&document).unwrap_or_default();
     let mut response = Json(document).into_response();
-    if let Some(digest) = digest {
-        if let Ok(value) = HeaderValue::from_str(&format!("\"{digest}\"")) {
-            response.headers_mut().insert(header::ETAG, value);
-        }
+    if let Ok(value) = HeaderValue::from_str(&format!("\"sha256:{:x}\"", Sha256::digest(&bytes))) {
+        response.headers_mut().insert(header::ETAG, value);
     }
     response
 }

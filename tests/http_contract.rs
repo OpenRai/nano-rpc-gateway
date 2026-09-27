@@ -747,6 +747,37 @@ async fn openrpc_advertises_listen_when_public_url_is_absent() {
 }
 
 #[tokio::test]
+async fn openrpc_etag_changes_with_public_url() {
+    let mut config = test_config(start_native_stub().await);
+    config.public_url = Some("https://gw.example.test/rpc".into());
+    let state = AppState::new(config).expect("state");
+    let first = etag_of_openrpc(state.clone()).await;
+    let again = etag_of_openrpc(state.clone()).await;
+    assert_eq!(first, again, "a stable document keeps its validator");
+
+    let mut other = test_config(start_native_stub().await);
+    other.public_url = Some("https://other.example.test/rpc".into());
+    let second = etag_of_openrpc(AppState::new(other).expect("state")).await;
+    assert_ne!(
+        first, second,
+        "advertising a different endpoint must change the validator"
+    );
+}
+
+async fn etag_of_openrpc(state: AppState) -> String {
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/openrpc.json")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    response.headers()[header::ETAG]
+        .to_str()
+        .expect("etag header")
+        .to_owned()
+}
+
+#[tokio::test]
 async fn asyncapi_advertises_configured_public_url_host() {
     let document = asyncapi_document("nano-node/test", "https://gw.example.test/rpc");
 
