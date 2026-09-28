@@ -955,7 +955,7 @@ impl NativeClient {
                     .as_str()
                     .is_some_and(|message| message.to_ascii_lowercase().contains("not found"))
             {
-                return Ok(json!({
+                let mut unopened = json!({
                     "frontier": null,
                     "open_block": null,
                     "representative_block": null,
@@ -964,7 +964,15 @@ impl NativeClient {
                     "confirmed_balance": "0",
                     "confirmation_height": "0",
                     "confirmation_height_frontier": null
-                }));
+                });
+                // Answer the fields the caller actually asked for. An unopened account
+                // has no receivable total, but omitting a requested field would still
+                // make the response shape differ from the upstream contract.
+                if truthy(params.get("receivable")) {
+                    unopened["receivable"] = Value::String("0".into());
+                    unopened["confirmed_receivable"] = Value::String("0".into());
+                }
+                return Ok(unopened);
             }
             if is_rate_limited_error(error) {
                 tracing::warn!(
@@ -1196,6 +1204,16 @@ fn upstream_label(url: &Url) -> String {
     }
 }
 
+/// Nano RPC boolean parameters arrive as either a JSON boolean or a "true"/"false"
+/// string, so both spellings have to be honoured.
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(flag)) => *flag,
+        Some(Value::String(text)) => text.eq_ignore_ascii_case("true"),
+        _ => false,
+    }
+}
+
 fn native_request_body(action: &str, params: &Value) -> serde_json::Map<String, Value> {
     let mut body = serde_json::Map::new();
     let upstream_action = match action {
@@ -1205,10 +1223,19 @@ fn native_request_body(action: &str, params: &Value) -> serde_json::Map<String, 
     body.insert("action".into(), Value::String(upstream_action.into()));
     if let Value::Object(values) = params {
         let mut native_params = values.clone();
-        // `receivable` is provided by the gateway's separate normalized method;
-        // it is not an account_info argument accepted by Nano node RPC.
         if action == "account_info" {
-            native_params.remove("receivable");
+            // Upstream `account_info` takes the receivable total as an optional v9.0+
+            // boolean documented as `pending`; the v24.0 rename made `receivable` the
+            // modern term in responses while keeping both. The gateway speaks the
+            // modern term, so translate it to the spelling the upstream request
+            // parameter actually uses instead of dropping it and forcing a second
+            // `receivable` round trip on every caller.
+            if let Some(value) = native_params.remove("receivable") {
+                // Upstream documents these flags in their string form, and the
+                // gateway already forces `include_confirmed` that way, so match it.
+                let flag = if truthy(Some(&value)) { "true" } else { "false" };
+                native_params.insert(String::from("pending"), Value::String(flag.into()));
+            }
             native_params.insert("include_confirmed".into(), Value::String("true".into()));
         }
         if action == "receivable" {
@@ -1890,6 +1917,9 @@ fn normalize_result(method: &str, value: &Value, params: &Value) -> Value {
             let Some(fields) = normalized.as_object_mut() else {
                 return normalized;
             };
+            // The upstream `receivable` flag arrives as `pending` and the response
+            // carries both spellings; keep only the current term.
+            fold_deprecated_pending(fields);
             let opened = fields
                 .get("frontier")
                 .and_then(Value::as_str)
@@ -1974,17 +2004,29 @@ fn normalize_result(method: &str, value: &Value, params: &Value) -> Value {
     }
 }
 
+/// Upstream renamed `pending` to `receivable` in v24.0 and still returns both spellings
+/// for backwards compatibility. The gateway exposes only the current term, folding the
+/// deprecated one into it so a caller never has to know the old name existed.
+fn fold_deprecated_pending(fields: &mut serde_json::Map<String, Value>) {
+    for (deprecated, current) in [
+        ("pending", "receivable"),
+        ("confirmed_pending", "confirmed_receivable"),
+    ] {
+        if let Some(value) = fields.remove(deprecated) {
+            fields.entry(String::from(current)).or_insert(value);
+        }
+    }
+}
+
 fn normalize_account_balance(value: &Value) -> Value {
     let mut normalized = value.clone();
     let Some(fields) = normalized.as_object_mut() else {
         return normalized;
     };
-    let receivable = fields
-        .remove("receivable")
-        .or_else(|| fields.remove("pending"))
-        .unwrap_or(Value::String("0".into()));
-    fields.insert("receivable".into(), receivable);
-    fields.remove("pending");
+    fold_deprecated_pending(fields);
+    fields
+        .entry(String::from("receivable"))
+        .or_insert(Value::String("0".into()));
     normalized
 }
 
@@ -3194,14 +3236,94 @@ node_ws_urls:
         assert!(validate_params("account_info", &json!({"account": 7})).is_err());
     }
     #[test]
-    fn account_info_does_not_forward_normalized_receivable_parameter() {
+    fn account_info_forwards_the_receivable_flag_as_the_upstream_pending_parameter() {
+        // Upstream spells the request parameter `pending`; the gateway-facing term is
+        // `receivable`. Dropping the flag would force every caller into a second
+        // round trip, so it must be translated rather than discarded.
         let request = native_request_body(
             "account_info",
             &json!({"account": "nano_opened", "include_confirmed": true, "receivable": true}),
         );
         assert_eq!(request["action"], "account_info");
         assert_eq!(request["include_confirmed"], "true");
+        assert_eq!(request["pending"], "true");
         assert!(!request.contains_key("receivable"));
+    }
+
+    #[test]
+    fn account_info_leaves_the_receivable_flag_alone_when_the_caller_omits_it() {
+        let request = native_request_body("account_info", &json!({"account": "nano_opened"}));
+        assert_eq!(request["include_confirmed"], "true");
+        assert!(!request.contains_key("pending"));
+    }
+
+    #[test]
+    fn account_info_passes_the_upstream_receivable_total_through() {
+        let normalized = normalize_result(
+            "account_info",
+            &json!({
+                "frontier": "FF84533A571D953A596EA401FD41743AC85D04F406E76FDE4408EAED50B473C5",
+                "balance": "235580100176034320859259343606608761791",
+                "confirmed_balance": "235580100176034320859259343606608761791",
+                "confirmation_height": "28",
+                "receivable": "2309370929000000000000000000000000",
+                "confirmed_receivable": "2309370929000000000000000000000000",
+            }),
+            &json!({}),
+        );
+        assert_eq!(normalized["receivable"], "2309370929000000000000000000000000");
+        assert_eq!(normalized["confirmed_receivable"], "2309370929000000000000000000000000");
+        assert!(normalized.get("opened").is_some_and(Value::is_boolean));
+    }
+
+    #[test]
+    fn account_info_drops_the_deprecated_pending_spelling() {
+        // v24.0 renamed pending to receivable and upstream still returns both. The
+        // gateway exposes only the current term.
+        let normalized = normalize_result(
+            "account_info",
+            &json!({
+                "frontier": "FF84533A571D953A596EA401FD41743AC85D04F406E76FDE4408EAED50B473C5",
+                "balance": "10000",
+                "confirmed_balance": "10000",
+                "confirmation_height": "28",
+                "pending": "5000",
+                "confirmed_pending": "4000",
+            }),
+            &json!({}),
+        );
+        assert_eq!(normalized["receivable"], "5000");
+        assert_eq!(normalized["confirmed_receivable"], "4000");
+        assert!(normalized.get("pending").is_none());
+        assert!(normalized.get("confirmed_pending").is_none());
+    }
+
+    #[test]
+    fn account_info_keeps_receivable_when_upstream_returns_both_spellings() {
+        let normalized = normalize_result(
+            "account_info",
+            &json!({
+                "frontier": "FF84533A571D953A596EA401FD41743AC85D04F406E76FDE4408EAED50B473C5",
+                "balance": "10000",
+                "confirmed_balance": "10000",
+                "confirmation_height": "28",
+                "receivable": "7000",
+                "pending": "5000",
+            }),
+            &json!({}),
+        );
+        assert_eq!(normalized["receivable"], "7000");
+        assert!(normalized.get("pending").is_none());
+    }
+
+    #[test]
+    fn truthy_accepts_both_boolean_spellings() {
+        assert!(truthy(Some(&json!(true))));
+        assert!(truthy(Some(&json!("true"))));
+        assert!(truthy(Some(&json!("True"))));
+        assert!(!truthy(Some(&json!(false))));
+        assert!(!truthy(Some(&json!("false"))));
+        assert!(!truthy(None));
     }
 
     #[test]
