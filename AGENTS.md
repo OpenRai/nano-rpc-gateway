@@ -23,6 +23,25 @@ bd close <id>         # Complete work
 bd dolt push          # Push beads data to remote
 ```
 
+## Upstream Conformance (non-negotiable)
+
+Every JSON-RPC method this Gateway exposes must be **1:1 equivalent to the
+upstream Nano RPC method** documented at
+<https://docs.nano.org/commands/rpc-protocol>. That means the same method name,
+the same parameters, and the same response fields as the node action it fronts.
+
+- No invented request parameters, and no invented or renamed response fields.
+- No silently dropping a parameter the upstream action documents. If a client asks
+  for something upstream supports, the Gateway honours it or the Gateway is wrong.
+- No convenience reshaping of upstream semantics.
+
+If the Gateway cannot serve an upstream parameter, **fix the Gateway**. Do not let
+a client work around the gap: a workaround hides the defect from every other
+consumer and leaves the non-conformance in place. A client sending an upstream
+parameter that the Gateway ignores is a Gateway bug, not a client bug.
+
+Cite the upstream doc section when adding or changing a method.
+
 ## Non-Interactive Shell Commands
 
 **ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
