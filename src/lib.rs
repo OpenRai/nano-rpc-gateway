@@ -36,7 +36,10 @@ use tokio_tungstenite::{
     connect_async,
     tungstenite::{
         client::IntoClientRequest,
-        http::{header::USER_AGENT, HeaderValue as TungsteniteHeaderValue, Request as TungsteniteRequest},
+        http::{
+            header::USER_AGENT, HeaderValue as TungsteniteHeaderValue,
+            Request as TungsteniteRequest,
+        },
         Message,
     },
 };
@@ -285,16 +288,98 @@ pub enum GatewayError {
     Upstream(String),
     #[error("upstream rejected request: {0}")]
     UpstreamRejected(String),
+    /// The node answered with its own `{"error": ...}` object. The inner string is
+    /// the node's message verbatim and becomes the JSON-RPC `message` unchanged.
+    ///
+    /// A rejected call says nothing about upstream health — a caller can submit an
+    /// invalid block indefinitely without the node being any less able to serve — so
+    /// this variant leaves routing untouched.
+    #[error("node reported an error: {0}")]
+    NodeRejected(String),
+    /// The node reported that it is rate limiting this caller. The message is still
+    /// the node's own string, but the upstream also leaves the rotation briefly
+    /// because this is a capacity condition rather than a caller error.
+    #[error("node rate limited the request: {0}")]
+    NodeRateLimited(String),
     #[error("upstream unavailable: {0}")]
     UpstreamUnavailable(String),
     #[error("upstream transport: {0}")]
     UpstreamTransport(String),
-    #[error("upstream outcome is indeterminate: {0}")]
-    UpstreamIndeterminate(String),
     #[error("invalid request: {0}")]
     InvalidRequest(String),
     #[error("authentication: {0}")]
     Auth(String),
+    /// An operator guard refused the call before it reached the node. Surfaced as a
+    /// transport-level rejection, never as a JSON-RPC error body.
+    #[error("rate limited: {0}")]
+    RateLimited(String),
+}
+
+/// Translation-layer item 2: one fixed code for every error the node itself reported.
+/// Failures that never reach the node use the standard JSON-RPC codes, so this value
+/// can be reserved exclusively for the node's own `error` string.
+pub const NODE_ERROR_CODE: i32 = -32000;
+
+/// A rejection that never reached the node, so it cannot be a JSON-RPC error body.
+///
+/// Translation-layer item 6 requires this separation: a refused call must not put a
+/// gateway-authored condition into the node's error space.
+pub struct TransportRejection {
+    pub status: StatusCode,
+    pub message: String,
+    pub retry_after: Option<u64>,
+}
+
+impl TransportRejection {
+    pub fn unauthorized() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: "Unauthorized".into(),
+            retry_after: None,
+        }
+    }
+
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
+            retry_after: None,
+        }
+    }
+
+    pub fn rate_limited(message: impl Into<String>, retry_after: u64) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: message.into(),
+            retry_after: Some(retry_after),
+        }
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+            retry_after: None,
+        }
+    }
+
+    pub fn gone(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::GONE,
+            message: message.into(),
+            retry_after: None,
+        }
+    }
+
+    pub fn into_response(self) -> Response {
+        let mut response = (self.status, Json(json!({"error": self.message}))).into_response();
+        if let Some(retry_after) = self.retry_after {
+            if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
+                response.headers_mut().insert(header::RETRY_AFTER, value);
+            }
+        }
+        response
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -908,8 +993,6 @@ impl NativeClient {
                 log_upstream_error("rpc", &self.endpoint, &error.to_string());
                 return Err(if error.is_connect() {
                     GatewayError::UpstreamUnavailable(error.to_string())
-                } else if error.is_timeout() {
-                    GatewayError::UpstreamIndeterminate(error.to_string())
                 } else {
                     GatewayError::UpstreamTransport(error.to_string())
                 });
@@ -950,52 +1033,19 @@ impl NativeClient {
             }
         };
         if let Some(error) = value.get("error") {
-            if action == "account_info"
-                && error
-                    .as_str()
-                    .is_some_and(|message| message.to_ascii_lowercase().contains("not found"))
-            {
-                let mut unopened = json!({
-                    "frontier": null,
-                    "open_block": null,
-                    "representative_block": null,
-                    "balance": "0",
-                    "confirmed_frontier": null,
-                    "confirmed_balance": "0",
-                    "confirmation_height": "0",
-                    "confirmation_height_frontier": null
-                });
-                // Answer the fields the caller actually asked for. An unopened account
-                // has no receivable total, but omitting a requested field would still
-                // make the response shape differ from the upstream contract.
-                if truthy(params.get("receivable")) {
-                    unopened["receivable"] = Value::String("0".into());
-                    unopened["confirmed_receivable"] = Value::String("0".into());
-                }
-                return Ok(unopened);
-            }
+            // Translation-layer item 2: the node reported this error, so its string
+            // becomes the JSON-RPC `message` verbatim. Every node-reported error takes
+            // the same path — including a rate limit, which is a node condition here
+            // and an operator guard only when the gateway itself refuses the call.
+            let reason = native_error_reason(error);
             if is_rate_limited_error(error) {
                 tracing::warn!(
                     action,
                     upstream = %self.label,
                     upstream_url = %redacted_endpoint,
                     authorization,
-                    reason = %error,
+                    reason = %reason,
                     "native upstream rate limited request"
-                );
-                return Err(GatewayError::UpstreamUnavailable(
-                    "upstream rate limit exceeded".into(),
-                ));
-            }
-            let native_reason = native_error_reason(error);
-            if action == "process" {
-                tracing::warn!(
-                    action,
-                    upstream = %self.label,
-                    upstream_url = %redacted_endpoint,
-                    authorization,
-                    reason = %native_reason,
-                    "native upstream rejected a process request"
                 );
             } else {
                 tracing::warn!(
@@ -1003,11 +1053,15 @@ impl NativeClient {
                     upstream = %self.label,
                     upstream_url = %redacted_endpoint,
                     authorization,
-                    reason = %native_reason,
+                    reason = %reason,
                     "native upstream rejected request"
                 );
             }
-            return Err(GatewayError::UpstreamRejected(native_reason));
+            return Err(if is_rate_limited_error(error) {
+                GatewayError::NodeRateLimited(reason)
+            } else {
+                GatewayError::NodeRejected(reason)
+            });
         }
         Ok(value)
     }
@@ -1066,114 +1120,6 @@ fn log_upstream_error(protocol: &str, endpoint: &str, error: &str) {
     );
 }
 
-#[derive(Clone, Copy)]
-struct ProcessRejectionReason {
-    code: &'static str,
-    message: &'static str,
-}
-
-fn classify_process_rejection(native_error: &str) -> ProcessRejectionReason {
-    let error = native_error.to_ascii_lowercase();
-    let matches = |patterns: &[&str]| patterns.iter().any(|pattern| error.contains(pattern));
-
-    if matches(&["signature", "bad signature"]) {
-        return ProcessRejectionReason {
-            code: "invalid_signature",
-            message: "Invalid block signature",
-        };
-    }
-    if matches(&[
-        "work is",
-        "work threshold",
-        "insufficient work",
-        "proof of work",
-        "invalid work",
-        "bad work",
-        "pow",
-    ]) {
-        return ProcessRejectionReason {
-            code: "insufficient_work",
-            message: "Insufficient proof of work",
-        };
-    }
-    if matches(&["gap previous"]) {
-        return ProcessRejectionReason {
-            code: "gap_previous",
-            message: "Previous frontier does not match",
-        };
-    }
-    if matches(&["gap source"]) {
-        return ProcessRejectionReason {
-            code: "gap_source",
-            message: "Referenced source block is unavailable",
-        };
-    }
-    if matches(&["fork"]) {
-        return ProcessRejectionReason {
-            code: "fork",
-            message: "Block conflicts with the account frontier",
-        };
-    }
-    if matches(&["unreceivable", "not receivable"]) {
-        return ProcessRejectionReason {
-            code: "unreceivable",
-            message: "Referenced receive is not receivable",
-        };
-    }
-    if matches(&["negative spend"]) {
-        return ProcessRejectionReason {
-            code: "negative_spend",
-            message: "Block spends more than the account balance",
-        };
-    }
-    if matches(&["balance mismatch"]) {
-        return ProcessRejectionReason {
-            code: "balance_mismatch",
-            message: "Block balance does not match the account state",
-        };
-    }
-    if matches(&["representative"]) {
-        return ProcessRejectionReason {
-            code: "invalid_representative",
-            message: "Invalid representative",
-        };
-    }
-    if matches(&["not opened", "account not found", "account is not open"]) {
-        return ProcessRejectionReason {
-            code: "account_not_opened",
-            message: "Account is not opened",
-        };
-    }
-    if matches(&["already exists", "already processed", "duplicate"]) {
-        return ProcessRejectionReason {
-            code: "already_exists",
-            message: "Block already exists",
-        };
-    }
-    if matches(&["queue", "too many blocks", "full"]) {
-        return ProcessRejectionReason {
-            code: "processor_busy",
-            message: "Node block processor is busy",
-        };
-    }
-    if matches(&["old"]) {
-        return ProcessRejectionReason {
-            code: "old_block",
-            message: "Block is older than the account frontier",
-        };
-    }
-    if matches(&["invalid"]) {
-        return ProcessRejectionReason {
-            code: "invalid_block",
-            message: "Block failed Nano validation",
-        };
-    }
-    ProcessRejectionReason {
-        code: "node_rejected",
-        message: "Node rejected the block",
-    }
-}
-
 fn is_rate_limited_error(error: &Value) -> bool {
     match error {
         Value::Number(value) => value.as_u64() == Some(429),
@@ -1204,44 +1150,18 @@ fn upstream_label(url: &Url) -> String {
     }
 }
 
-/// Nano RPC boolean parameters arrive as either a JSON boolean or a "true"/"false"
-/// string, so both spellings have to be honoured.
-fn truthy(value: Option<&Value>) -> bool {
-    match value {
-        Some(Value::Bool(flag)) => *flag,
-        Some(Value::String(text)) => text.eq_ignore_ascii_case("true"),
-        _ => false,
-    }
-}
-
+/// Build the upstream request body.
+///
+/// Translation-layer item 1: `params` is the upstream request object without
+/// `action`, and it is forwarded unchanged. The gateway never injects a
+/// parameter, never rewrites one, and never substitutes an upstream spelling.
+/// Upstream defaults therefore apply as the node documents them, which is what
+/// keeps the response shape predictable for callers.
 fn native_request_body(action: &str, params: &Value) -> serde_json::Map<String, Value> {
     let mut body = serde_json::Map::new();
-    let upstream_action = match action {
-        "receivable" => "pending",
-        other => other,
-    };
-    body.insert("action".into(), Value::String(upstream_action.into()));
+    body.insert("action".into(), Value::String(action.to_owned()));
     if let Value::Object(values) = params {
-        let mut native_params = values.clone();
-        if action == "account_info" {
-            // Upstream `account_info` takes the receivable total as an optional v9.0+
-            // boolean documented as `pending`; the v24.0 rename made `receivable` the
-            // modern term in responses while keeping both. The gateway speaks the
-            // modern term, so translate it to the spelling the upstream request
-            // parameter actually uses instead of dropping it and forcing a second
-            // `receivable` round trip on every caller.
-            if let Some(value) = native_params.remove("receivable") {
-                // Upstream documents these flags in their string form, and the
-                // gateway already forces `include_confirmed` that way, so match it.
-                let flag = if truthy(Some(&value)) { "true" } else { "false" };
-                native_params.insert(String::from("pending"), Value::String(flag.into()));
-            }
-            native_params.insert("include_confirmed".into(), Value::String("true".into()));
-        }
-        if action == "receivable" {
-            native_params.insert("source".into(), Value::String("true".into()));
-        }
-        body.extend(native_params);
+        body.extend(values.clone());
     }
     body
 }
@@ -1325,9 +1245,16 @@ impl NativeRouter {
                     }
                     return Ok(value);
                 }
-                Err(error) if self.can_failover(&error) => {
+                Err(error) if self.cools_down(&error) => {
+                    // A node-reported condition takes this upstream out of rotation for
+                    // future calls, but it is not retried elsewhere: the caller gets the
+                    // node's own answer rather than a different node's.
                     self.mark_unhealthy(index).await;
-                    last_error = Some(error);
+                    if self.can_failover(&error) {
+                        last_error = Some(error);
+                    } else {
+                        return Err(error);
+                    }
                 }
                 Err(error) => return Err(error),
             }
@@ -1341,6 +1268,17 @@ impl NativeRouter {
         Err(error)
     }
 
+    /// Whether this failure should take the upstream out of rotation for a while.
+    /// Only capacity conditions qualify; a rejected call must not degrade service
+    /// for every other caller.
+    fn cools_down(&self, error: &GatewayError) -> bool {
+        matches!(
+            error,
+            GatewayError::UpstreamUnavailable(_) | GatewayError::NodeRateLimited(_)
+        )
+    }
+
+    /// Whether this failure is worth retrying against a different upstream.
     fn can_failover(&self, error: &GatewayError) -> bool {
         matches!(error, GatewayError::UpstreamUnavailable(_))
     }
@@ -1353,8 +1291,6 @@ impl NativeRouter {
             log_upstream_selected("rpc", &self.clients[next].endpoint, "active_changed");
         }
     }
-
-
 }
 
 fn validate_upstream_url(endpoint: &str, schemes: &[&str]) -> Result<(), GatewayError> {
@@ -1614,7 +1550,10 @@ impl AppState {
             events: EventHub::new(EVENT_HISTORY_CAPACITY),
             metrics: Metrics::default(),
             ws_active: Arc::new(AtomicUsize::new(0)),
-            ws_unhealthy_until: Arc::new(Mutex::new(vec![Instant::now(); config.node_ws_urls.len()])),
+            ws_unhealthy_until: Arc::new(Mutex::new(vec![
+                Instant::now();
+                config.node_ws_urls.len()
+            ])),
             config,
             verifying_key,
             upstream_ready: Arc::new(AtomicBool::new(false)),
@@ -1622,9 +1561,13 @@ impl AppState {
             ws_selected: Arc::new(Mutex::new(None)),
         })
     }
-    async fn dispatch(&self, request: RpcRequest, headers: &HeaderMap) -> RpcResponse {
+    async fn dispatch(
+        &self,
+        request: RpcRequest,
+        headers: &HeaderMap,
+    ) -> Result<RpcResponse, TransportRejection> {
         if request.jsonrpc != "2.0" || request.method.is_empty() {
-            return RpcResponse::err(request.id, -32600, "Invalid Request");
+            return Ok(RpcResponse::err(request.id, -32600, "Invalid Request"));
         }
         if request.id_present
             && request
@@ -1632,17 +1575,21 @@ impl AppState {
                 .as_ref()
                 .is_some_and(|id| !(id.is_string() || id.is_number() || id.is_null()))
         {
-            return RpcResponse::err(
+            return Ok(RpcResponse::err(
                 request.id,
                 -32600,
                 "Invalid Request: id must be string, number, or null",
-            );
+            ));
         }
         if !request.id_present {
-            return RpcResponse::err(None, -32600, "Notifications are not supported");
+            return Ok(RpcResponse::err(
+                None,
+                -32600,
+                "Notifications are not supported",
+            ));
         }
         if request.method == "rpc.discover" {
-            return if self.config.enable_discovery {
+            return Ok(if self.config.enable_discovery {
                 RpcResponse::ok(
                     request.id,
                     openrpc_document_with_auth(
@@ -1659,95 +1606,81 @@ impl AppState {
                     -32601,
                     "Discovery is disabled; fetch /openrpc.json",
                 )
-            };
+            });
         }
         let spec = registry()
             .into_iter()
             .find(|item| item.name == request.method);
         let Some(spec) = spec else {
-            return RpcResponse::err(request.id, -32601, "Method not found");
+            return Ok(RpcResponse::err(request.id, -32601, "Method not found"));
         };
         if spec.scope == Scope::Work && !self.config.allow_work {
-            return RpcResponse::err(request.id, -32604, "Work generation is disabled");
+            return Ok(RpcResponse::err(
+                request.id,
+                -32604,
+                "Work generation is disabled",
+            ));
         }
+        // An authentication failure never reaches the node, so it is answered at the
+        // transport layer rather than as a node-reported condition.
         let common_auth_required = spec.scope != Scope::Common || self.config.require_common_auth;
         if spec.scope != Scope::Base
             && common_auth_required
             && !self.authorized(headers, spec.scope)
         {
-            return RpcResponse::err(request.id, -32001, "Unauthorized");
+            return Err(TransportRejection::unauthorized());
         }
         let params = request.params.unwrap_or_else(|| json!({}));
         if let Err(message) = validate_params(spec.name, &params) {
-            return RpcResponse::err(request.id, -32602, message);
+            return Ok(RpcResponse::err(request.id, -32602, message));
         }
+        // Translation-layer item 6: an operator guard refuses the call at the
+        // transport layer, so it can never appear as a JSON-RPC error body.
+        self.guard(spec.name, &params)?;
         match self.native.call(spec.name, &params).await {
+            // Translation-layer item 1: `result` is the upstream response object,
+            // unchanged. The only check is that it still matches the pinned profile.
             Ok(result) => {
-                let normalized = normalize_result(spec.name, &result, &params);
-                if validate_result(spec.name, &normalized) {
-                    RpcResponse::ok(request.id, normalized)
+                if validate_result(spec.name, &result) {
+                    Ok(RpcResponse::ok(request.id, result))
                 } else {
-                    RpcResponse::err(
+                    Ok(RpcResponse::err(
                         request.id,
                         -32000,
                         "Upstream result does not match the selected profile schema",
-                    )
+                    ))
                 }
             }
+            // Translation-layer item 2: the node reported this error, so its string is
+            // the JSON-RPC message verbatim, under one fixed code.
+            Err(GatewayError::NodeRejected(reason))
+            | Err(GatewayError::NodeRateLimited(reason)) => {
+                Ok(RpcResponse::err(request.id, NODE_ERROR_CODE, reason))
+            }
             Err(GatewayError::Upstream(_)) => {
-                // Native responses can echo request material (for example a
-                // signed block). Keep that diagnostic inside the adapter and
-                // expose only the stable public error contract.
-                RpcResponse::err(request.id, -32000, "Upstream request failed")
-            }
-            Err(GatewayError::UpstreamRejected(reason)) => {
-                let process_reason = if spec.name == "process" {
-                    Some(classify_process_rejection(&reason))
-                } else {
-                    None
-                };
-                let message = process_reason
-                    .map(|reason| format!("Process rejected: {}", reason.message))
-                    .unwrap_or_else(|| "Request rejected by upstream".into());
-                let data = process_reason
-                    .map(|classified| {
-                        json!({
-                            "kind":"upstream_rejection",
-                            "reason":classified.code,
-                            "native_reason":reason
-                        })
-                    })
-                    .unwrap_or_else(|| json!({"kind":"upstream_rejection"}));
-                RpcResponse::err_with_data(request.id, -32010, message, Some(data))
-            }
-            Err(GatewayError::UpstreamIndeterminate(_)) => RpcResponse::err_with_data(
-                request.id,
-                -32002,
-                "Upstream outcome is indeterminate",
-                Some(json!({"kind":"indeterminate"})),
-            ),
-            Err(GatewayError::UpstreamUnavailable(_)) | Err(GatewayError::UpstreamTransport(_)) => {
-                RpcResponse::err_with_data(
+                // Native responses can echo request material (for example a signed
+                // block). Keep that diagnostic inside the adapter and expose only the
+                // stable public error contract.
+                Ok(RpcResponse::err(
                     request.id,
                     -32000,
-                    "Upstream unavailable",
-                    Some(json!({"kind":"upstream_unavailable"})),
-                )
+                    "Upstream request failed",
+                ))
             }
-            Err(GatewayError::InvalidRequest(message)) => RpcResponse::err_with_data(
-                request.id,
-                -32602,
-                message,
-                Some(json!({"kind":"invalid_request"})),
-            ),
-            Err(GatewayError::Auth(_)) => RpcResponse::err_with_data(
-                request.id,
-                -32001,
-                "Unauthorized",
-                Some(json!({"kind":"unauthorized"})),
-            ),
-            Err(error) => RpcResponse::err(request.id, -32000, error.to_string()),
+            Err(GatewayError::UpstreamUnavailable(_)) | Err(GatewayError::UpstreamTransport(_)) => {
+                Ok(RpcResponse::err(request.id, -32000, "Upstream unavailable"))
+            }
+            Err(GatewayError::InvalidRequest(message)) => {
+                Ok(RpcResponse::err(request.id, -32602, message))
+            }
+            Err(error) => Ok(RpcResponse::err(request.id, -32000, error.to_string())),
         }
+    }
+    /// Operator guards that refuse a call before it reaches the node. Returning an
+    /// error here means the call never happened, so the response is not JSON-RPC.
+    fn guard(&self, method: &str, _params: &Value) -> Result<(), TransportRejection> {
+        let _ = method;
+        Ok(())
     }
     fn authorized(&self, headers: &HeaderMap, scope: Scope) -> bool {
         let Some(key) = self.verifying_key.as_ref() else {
@@ -1839,18 +1772,13 @@ fn has_string(object: &serde_json::Map<String, Value>, name: &str) -> bool {
         .is_some_and(|value| !value.is_empty())
 }
 
+/// Check that an upstream response still matches the shape the profile documents.
+///
+/// This guards against a provider variant drifting away from the pinned baseline. It
+/// asserts only the fields the node documents as unconditional, and it accepts the
+/// documented value forms: `confirmed` and `height` arrive as strings, and `contents`
+/// is a JSON string unless `json_block` was requested.
 fn validate_result(method: &str, result: &Value) -> bool {
-    if method == "receivable" {
-        return result.as_array().is_some_and(|entries| {
-            entries.iter().all(|entry| {
-                entry.as_object().is_some_and(|item| {
-                    ["source", "hash", "amount"]
-                        .iter()
-                        .all(|field| has_string(item, field))
-                })
-            })
-        });
-    }
     let Some(object) = result.as_object() else {
         return false;
     };
@@ -1859,38 +1787,66 @@ fn validate_result(method: &str, result: &Value) -> bool {
         "block_count" => ["count", "unchecked", "cemented"]
             .iter()
             .all(|field| has_string(object, field)),
-        "account_info" => {
-            object.get("opened").is_some_and(Value::is_boolean)
-                && ["balance", "confirmed_balance", "confirmation_height"]
-                    .iter()
-                    .all(|field| has_string(object, field))
-        }
+        // `confirmed_*` fields appear only when `include_confirmed` was requested,
+        // so they cannot be required here.
+        "account_info" => [
+            "frontier",
+            "open_block",
+            "representative_block",
+            "balance",
+            "modified_timestamp",
+            "block_count",
+            "account_version",
+        ]
+        .iter()
+        .all(|field| has_string(object, field)),
+        // `pending` is a deprecated upstream alias and is not requested, so the
+        // response carries `balance` and `receivable` only.
         "account_balance" => ["balance", "receivable"]
             .iter()
             .all(|field| has_string(object, field)),
-        "accounts_balances" => object.get("balances").is_some_and(|balances| {
-            balances.as_object().is_some_and(|items| {
-                items
-                    .values()
-                    .all(|item| validate_result("account_balance", item))
-            })
-        }),
+        // Both maps are optional: the node omits `balances` when every requested
+        // account failed and omits `errors` when none did.
+        "accounts_balances" => {
+            let balances = object.get("balances").is_some_and(|balances| {
+                balances.as_object().is_some_and(|items| {
+                    items
+                        .values()
+                        .all(|item| validate_result("account_balance", item))
+                })
+            });
+            let errors = object.get("errors").is_some_and(|errors| {
+                errors
+                    .as_object()
+                    .is_some_and(|items| items.values().all(Value::is_string))
+            });
+            (balances || errors)
+                && object
+                    .get("balances")
+                    .is_none_or(|balances| balances.is_object())
+                && object.get("errors").is_none_or(Value::is_object)
+        }
+        // `previous` is present only when `count` truncated the result; `next`
+        // replaces it when `reverse` is set.
         "account_history" => {
             has_string(object, "account") && object.get("history").is_some_and(Value::is_array)
         }
+        // No `hash`: the caller supplied it. `subtype` exists for state blocks only,
+        // so it is not required.
         "block_info" => {
             [
-                "hash",
                 "block_account",
                 "amount",
                 "balance",
                 "height",
-                "subtype",
+                "local_timestamp",
             ]
             .iter()
             .all(|field| has_string(object, field))
-                && object.get("confirmed").is_some_and(Value::is_boolean)
-                && object.get("block").is_some_and(Value::is_object)
+                && object.contains_key("contents")
+                && object
+                    .get("confirmed")
+                    .is_some_and(|confirmed| confirmed.is_boolean() || confirmed.is_string())
         }
         "blocks_info" => object.get("blocks").is_some_and(|blocks| {
             blocks.as_object().is_some_and(|items| {
@@ -1899,192 +1855,15 @@ fn validate_result(method: &str, result: &Value) -> bool {
                     .all(|item| validate_result("block_info", item))
             })
         }),
+        // Upstream returns the node's three documented `blocks` shapes depending on
+        // `threshold` and `source`, so only the presence of the key is asserted.
+        "receivable" => object.contains_key("blocks"),
         "process" => has_string(object, "hash"),
         "work_generate" => ["hash", "work", "difficulty", "multiplier"]
             .iter()
             .all(|field| has_string(object, field)),
         _ => false,
     }
-}
-
-fn normalize_result(method: &str, value: &Value, params: &Value) -> Value {
-    let Some(object) = value.as_object() else {
-        return value.clone();
-    };
-    match method {
-        "account_info" => {
-            let mut normalized = value.clone();
-            let Some(fields) = normalized.as_object_mut() else {
-                return normalized;
-            };
-            // The upstream `receivable` flag arrives as `pending` and the response
-            // carries both spellings; keep only the current term.
-            fold_deprecated_pending(fields);
-            let opened = fields
-                .get("frontier")
-                .and_then(Value::as_str)
-                .is_some_and(|frontier| !frontier.is_empty());
-            fields.insert("opened".into(), Value::Bool(opened));
-            for field in [
-                "frontier",
-                "open_block",
-                "representative_block",
-                "confirmation_height_frontier",
-            ] {
-                fields.entry(field).or_insert(Value::Null);
-            }
-            if !fields.contains_key("confirmation_height") {
-                let height = fields
-                    .get("confirmed_height")
-                    .cloned()
-                    .unwrap_or(Value::String("0".into()));
-                fields.insert("confirmation_height".into(), height);
-            }
-            normalized
-        }
-        "account_balance" => normalize_account_balance(value),
-        "accounts_balances" => normalize_accounts_balances(value),
-        "receivable" => {
-            if let Some(entries) = value.as_array() {
-                return Value::Array(entries.iter().map(normalize_receivable_entry).collect());
-            }
-            // Public Nano RPC nodes commonly encode an empty receivable set as
-            // `blocks: ""` for unopened accounts. The profile contract uses an
-            // empty array, so normalize that wire representation explicitly.
-            if object
-                .get("blocks")
-                .and_then(Value::as_str)
-                .is_some_and(str::is_empty)
-            {
-                return Value::Array(Vec::new());
-            }
-            if let Some(entries) = object.get("blocks").and_then(Value::as_array) {
-                return Value::Array(entries.iter().map(normalize_receivable_entry).collect());
-            }
-            let entries = object
-                .get("blocks")
-                .and_then(Value::as_object)
-                .unwrap_or(object);
-            Value::Array(
-                entries
-                    .iter()
-                    .map(|(hash, item)| {
-                        let mut entry = normalize_receivable_entry(item);
-                        if entry
-                            .get("hash")
-                            .and_then(Value::as_str)
-                            .is_none_or(str::is_empty)
-                        {
-                            if let Some(entry) = entry.as_object_mut() {
-                                entry.insert("hash".into(), Value::String(hash.clone()));
-                            }
-                        }
-                        entry
-                    })
-                    .collect(),
-            )
-        }
-        "block_info" => normalize_block_info(value, params.get("hash").and_then(Value::as_str)),
-        "blocks_info" => {
-            let blocks = object
-                .get("blocks")
-                .and_then(Value::as_object)
-                .unwrap_or(object);
-            Value::Object(serde_json::Map::from_iter([(
-                "blocks".into(),
-                Value::Object(
-                    blocks
-                        .iter()
-                        .map(|(hash, item)| (hash.clone(), normalize_block_info(item, Some(hash))))
-                        .collect(),
-                ),
-            )]))
-        }
-        _ => value.clone(),
-    }
-}
-
-/// Upstream renamed `pending` to `receivable` in v24.0 and still returns both spellings
-/// for backwards compatibility. The gateway exposes only the current term, folding the
-/// deprecated one into it so a caller never has to know the old name existed.
-fn fold_deprecated_pending(fields: &mut serde_json::Map<String, Value>) {
-    for (deprecated, current) in [
-        ("pending", "receivable"),
-        ("confirmed_pending", "confirmed_receivable"),
-    ] {
-        if let Some(value) = fields.remove(deprecated) {
-            fields.entry(String::from(current)).or_insert(value);
-        }
-    }
-}
-
-fn normalize_account_balance(value: &Value) -> Value {
-    let mut normalized = value.clone();
-    let Some(fields) = normalized.as_object_mut() else {
-        return normalized;
-    };
-    fold_deprecated_pending(fields);
-    fields
-        .entry(String::from("receivable"))
-        .or_insert(Value::String("0".into()));
-    normalized
-}
-
-fn normalize_accounts_balances(value: &Value) -> Value {
-    let mut normalized = value.clone();
-    let Some(fields) = normalized.as_object_mut() else {
-        return normalized;
-    };
-    if let Some(balances) = fields.get_mut("balances").and_then(Value::as_object_mut) {
-        for balance in balances.values_mut() {
-            *balance = normalize_account_balance(balance);
-        }
-    }
-    normalized
-}
-
-fn normalize_receivable_entry(value: &Value) -> Value {
-    let Some(object) = value.as_object() else {
-        return json!({});
-    };
-    json!({
-        "source": object.get("source").or_else(|| object.get("sender")).cloned().unwrap_or(Value::String(String::new())),
-        "hash": object.get("hash").cloned().unwrap_or(Value::String(String::new())),
-        "amount": object.get("amount").cloned().unwrap_or(Value::String(String::new())),
-    })
-}
-
-fn normalize_block_info(value: &Value, hash: Option<&str>) -> Value {
-    let Some(object) = value.as_object() else {
-        return json!({});
-    };
-    let block = object
-        .get("block")
-        .cloned()
-        .or_else(|| {
-            object.get("contents").and_then(|contents| match contents {
-                Value::Object(_) => Some(contents.clone()),
-                Value::String(text) => serde_json::from_str(text).ok(),
-                _ => None,
-            })
-        })
-        .unwrap_or_else(|| json!({}));
-    let subtype = object
-        .get("subtype")
-        .and_then(Value::as_str)
-        .or_else(|| block.get("subtype").and_then(Value::as_str))
-        .or_else(|| block.get("type").and_then(Value::as_str))
-        .unwrap_or_default();
-    json!({
-        "hash": object.get("hash").and_then(Value::as_str).or(hash).unwrap_or_default(),
-        "block_account": object.get("block_account").cloned().unwrap_or(Value::String(String::new())),
-        "amount": object.get("amount").cloned().unwrap_or(Value::String("0".into())),
-        "balance": object.get("balance").cloned().unwrap_or(Value::String("0".into())),
-        "height": object.get("height").cloned().unwrap_or(Value::String("0".into())),
-        "subtype": subtype,
-        "confirmed": object.get("confirmed").and_then(Value::as_bool).or_else(|| object.get("confirmed").and_then(Value::as_str).map(|value| value == "true")).unwrap_or(false),
-        "block": block,
-    })
 }
 
 pub fn app(state: AppState) -> Router {
@@ -2171,11 +1950,7 @@ nano_gateway_request_duration_ms_sum {}\nnano_gateway_request_duration_ms_count 
     )
 }
 
-async fn rpc_handler(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Json<RpcResponse> {
+async fn rpc_handler(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
     let started = Instant::now();
     let log_rpc = state.config.log_rpc;
     let _request_metrics = RequestMetricsGuard {
@@ -2193,7 +1968,8 @@ async fn rpc_handler(
             None,
             -32600,
             "Batch requests are not supported",
-        ));
+        ))
+        .into_response();
     }
     let value = match serde_json::from_slice::<Value>(&body) {
         Ok(value) => value,
@@ -2203,12 +1979,13 @@ async fn rpc_handler(
                 None,
                 -32700,
                 format!("Parse error: {error}"),
-            ));
+            ))
+            .into_response();
         }
     };
     if !value.is_object() {
         state.metrics.errors.fetch_add(1, Ordering::Relaxed);
-        return Json(RpcResponse::err(None, -32600, "Invalid Request"));
+        return Json(RpcResponse::err(None, -32600, "Invalid Request")).into_response();
     }
     let id_present = value.get("id").is_some();
     let mut request = match serde_json::from_value::<RpcRequest>(value) {
@@ -2219,7 +1996,8 @@ async fn rpc_handler(
                 None,
                 -32600,
                 format!("Invalid Request: {error}"),
-            ));
+            ))
+            .into_response();
         }
     };
     request.id_present = id_present;
@@ -2227,11 +2005,18 @@ async fn rpc_handler(
     if log_rpc {
         log_rpc_request(&method);
     }
-    let response = state.dispatch(request, &headers).await;
-    if response.error.is_some() {
-        state.metrics.errors.fetch_add(1, Ordering::Relaxed);
+    match state.dispatch(request, &headers).await {
+        Ok(response) => {
+            if response.error.is_some() {
+                state.metrics.errors.fetch_add(1, Ordering::Relaxed);
+            }
+            Json(response).into_response()
+        }
+        Err(rejection) => {
+            state.metrics.errors.fetch_add(1, Ordering::Relaxed);
+            rejection.into_response()
+        }
     }
-    Json(response)
 }
 async fn openrpc_handler(State(state): State<AppState>) -> Response {
     let document = openrpc_document_with_auth(
@@ -2837,8 +2622,7 @@ mod tests {
 
     #[test]
     fn shipped_example_config_parses_and_validates() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("gateway.yaml.example");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("gateway.yaml.example");
         let contents = std::fs::read_to_string(&path).expect("gateway.yaml.example is readable");
         let config: Config = serde_yaml::from_str(&contents).expect("example config parses");
         config.clone().validate().expect("example config validates");
@@ -3024,45 +2808,44 @@ mod tests {
     }
 
     #[test]
-    fn account_info_normalizes_unopened_accounts_and_process_is_browser_capable() {
-        let account = normalize_result(
-            "account_info",
-            &json!({"frontier": null, "balance": "0"}),
-            &json!({"account": "nano_unopened"}),
-        );
-        assert_eq!(account["opened"], false);
-        assert!(account.get("confirmed_balance").is_none());
-        assert!(account.get("confirmed_frontier").is_none());
-        let document =
-            openrpc_document("nano-node/V28.2", false, true, "http://127.0.0.1:8090/rpc");
-        let process = document["methods"]
-            .as_array()
-            .expect("methods")
-            .iter()
-            .find(|method| method["name"] == "process")
-            .expect("process method");
-        assert_eq!(process["x-nano-capability"]["browser_safe"], true);
+    fn account_info_result_is_the_upstream_object_unchanged() {
+        // Translation-layer item 1: no `opened` field, no null placeholders, and no
+        // synthesis of `confirmation_height` from `confirmed_height`.
+        let upstream = json!({
+            "frontier": "FF84533A571D953A596EA401FD41743AC85D04F406E76FDE4408EAED50B473C5",
+            "open_block": "991CF190094C00F0B68E2E5F75F6BEE95A2E0BD93CEAA4A6734DB9F19B728948",
+            "representative_block": "991CF190094C00F0B68E2E5F75F6BEE95A2E0BD93CEAA4A6734DB9F19B728948",
+            "balance": "10000",
+            "modified_timestamp": "1501793775",
+            "block_count": "33",
+            "account_version": "1",
+            "confirmation_height": "28"
+        });
+        assert!(validate_result("account_info", &upstream));
+        assert!(upstream
+            .as_object()
+            .expect("object")
+            .get("opened")
+            .is_none());
+        assert!(upstream
+            .as_object()
+            .expect("object")
+            .get("confirmed_balance")
+            .is_none());
     }
 
     #[test]
-    fn accounts_balances_preserves_each_native_balance_and_normalizes_receivable() {
-        let normalized = normalize_result(
+    fn accounts_balances_keeps_each_native_balance_verbatim() {
+        let upstream = json!({"balances": {
+            "nano_first": {"balance": "10", "receivable": "1"},
+            "nano_second": {"balance": "20", "receivable": "2"}
+        }});
+        assert!(validate_result("accounts_balances", &upstream));
+        // Both maps are optional, so an errors-only response is valid too.
+        assert!(validate_result(
             "accounts_balances",
-            &json!({"balances": {
-                "nano_first": {"balance": "10", "pending": "1"},
-                "nano_second": {"balance": "20", "receivable": "2"}
-            }}),
-            &json!({"accounts": ["nano_first", "nano_second"]}),
-        );
-        assert_eq!(
-            normalized["balances"]["nano_first"],
-            json!({"balance": "10", "receivable": "1"})
-        );
-        assert_eq!(
-            normalized["balances"]["nano_second"],
-            json!({"balance": "20", "receivable": "2"})
-        );
-        assert!(validate_result("accounts_balances", &normalized));
+            &json!({"errors": {"nano_first": "Account not found"}})
+        ));
     }
 
     #[test]
@@ -3236,94 +3019,19 @@ node_ws_urls:
         assert!(validate_params("account_info", &json!({"account": 7})).is_err());
     }
     #[test]
-    fn account_info_forwards_the_receivable_flag_as_the_upstream_pending_parameter() {
-        // Upstream spells the request parameter `pending`; the gateway-facing term is
-        // `receivable`. Dropping the flag would force every caller into a second
-        // round trip, so it must be translated rather than discarded.
-        let request = native_request_body(
-            "account_info",
-            &json!({"account": "nano_opened", "include_confirmed": true, "receivable": true}),
-        );
-        assert_eq!(request["action"], "account_info");
-        assert_eq!(request["include_confirmed"], "true");
-        assert_eq!(request["pending"], "true");
-        assert!(!request.contains_key("receivable"));
-    }
-
-    #[test]
-    fn account_info_leaves_the_receivable_flag_alone_when_the_caller_omits_it() {
+    fn native_request_body_forwards_params_untouched() {
+        // Translation-layer item 1: the gateway injects and rewrites nothing, so the
+        // node's own documented defaults apply.
         let request = native_request_body("account_info", &json!({"account": "nano_opened"}));
-        assert_eq!(request["include_confirmed"], "true");
+        assert_eq!(request["action"], "account_info");
+        assert_eq!(request.len(), 2);
+        assert!(!request.contains_key("include_confirmed"));
         assert!(!request.contains_key("pending"));
-    }
 
-    #[test]
-    fn account_info_passes_the_upstream_receivable_total_through() {
-        let normalized = normalize_result(
-            "account_info",
-            &json!({
-                "frontier": "FF84533A571D953A596EA401FD41743AC85D04F406E76FDE4408EAED50B473C5",
-                "balance": "235580100176034320859259343606608761791",
-                "confirmed_balance": "235580100176034320859259343606608761791",
-                "confirmation_height": "28",
-                "receivable": "2309370929000000000000000000000000",
-                "confirmed_receivable": "2309370929000000000000000000000000",
-            }),
-            &json!({}),
-        );
-        assert_eq!(normalized["receivable"], "2309370929000000000000000000000000");
-        assert_eq!(normalized["confirmed_receivable"], "2309370929000000000000000000000000");
-        assert!(normalized.get("opened").is_some_and(Value::is_boolean));
-    }
-
-    #[test]
-    fn account_info_drops_the_deprecated_pending_spelling() {
-        // v24.0 renamed pending to receivable and upstream still returns both. The
-        // gateway exposes only the current term.
-        let normalized = normalize_result(
-            "account_info",
-            &json!({
-                "frontier": "FF84533A571D953A596EA401FD41743AC85D04F406E76FDE4408EAED50B473C5",
-                "balance": "10000",
-                "confirmed_balance": "10000",
-                "confirmation_height": "28",
-                "pending": "5000",
-                "confirmed_pending": "4000",
-            }),
-            &json!({}),
-        );
-        assert_eq!(normalized["receivable"], "5000");
-        assert_eq!(normalized["confirmed_receivable"], "4000");
-        assert!(normalized.get("pending").is_none());
-        assert!(normalized.get("confirmed_pending").is_none());
-    }
-
-    #[test]
-    fn account_info_keeps_receivable_when_upstream_returns_both_spellings() {
-        let normalized = normalize_result(
-            "account_info",
-            &json!({
-                "frontier": "FF84533A571D953A596EA401FD41743AC85D04F406E76FDE4408EAED50B473C5",
-                "balance": "10000",
-                "confirmed_balance": "10000",
-                "confirmation_height": "28",
-                "receivable": "7000",
-                "pending": "5000",
-            }),
-            &json!({}),
-        );
-        assert_eq!(normalized["receivable"], "7000");
-        assert!(normalized.get("pending").is_none());
-    }
-
-    #[test]
-    fn truthy_accepts_both_boolean_spellings() {
-        assert!(truthy(Some(&json!(true))));
-        assert!(truthy(Some(&json!("true"))));
-        assert!(truthy(Some(&json!("True"))));
-        assert!(!truthy(Some(&json!(false))));
-        assert!(!truthy(Some(&json!("false"))));
-        assert!(!truthy(None));
+        // `source` is opt-in and never forced.
+        let request = native_request_body("receivable", &json!({"account": "nano_opened"}));
+        assert_eq!(request["action"], "receivable");
+        assert!(!request.contains_key("source"));
     }
 
     #[test]
@@ -3342,13 +3050,6 @@ node_ws_urls:
     }
 
     #[test]
-    fn receivable_requests_native_source_metadata() {
-        let request = native_request_body("receivable", &json!({"account": "nano_opened"}));
-        assert_eq!(request["action"], "pending");
-        assert_eq!(request["source"], "true");
-    }
-
-    #[test]
     fn result_shapes_are_checked_against_the_profile() {
         assert!(validate_result("process", &json!({"hash": "A"})));
         assert!(!validate_result("process", &json!({"hash": 7})));
@@ -3356,115 +3057,117 @@ node_ws_urls:
     }
 
     #[test]
-    fn receivable_empty_blocks_string_normalizes_to_empty_array() {
-        let normalized = normalize_result(
+    fn receivable_result_keeps_the_nodes_three_documented_shapes() {
+        // Default: an array of hashes.
+        assert!(validate_result(
             "receivable",
-            &json!({"blocks": ""}),
-            &json!({"account": "nano_unopened"}),
-        );
-        assert_eq!(normalized, json!([]));
-        assert!(validate_result("receivable", &normalized));
-    }
-
-    #[test]
-    fn account_info_confirmed_height_normalizes_to_profile_name() {
-        let normalized = normalize_result(
-            "account_info",
-            &json!({
-                "frontier": "A",
-                "balance": "1",
-                "confirmed_frontier": "A",
-                "confirmed_balance": "1",
-                "confirmed_height": "7"
-            }),
-            &json!({"account": "nano_opened"}),
-        );
-        assert_eq!(normalized["confirmation_height"], "7");
-        assert!(validate_result("account_info", &normalized));
-    }
-
-    #[test]
-    fn account_info_does_not_invent_confirmed_state() {
-        let normalized = normalize_result(
-            "account_info",
-            &json!({"frontier": "unconfirmed", "balance": "9"}),
-            &json!({"account": "nano_opened"}),
-        );
-        assert!(normalized.get("confirmed_balance").is_none());
-        assert!(normalized.get("confirmed_frontier").is_none());
-        assert!(!validate_result("account_info", &normalized));
-    }
-
-    #[test]
-    fn receivable_blocks_array_normalizes_to_profile_entries() {
-        let normalized = normalize_result(
+            &json!({"blocks": ["000D1BAEC8EC208142C99059B393051BAC8380F9B5A2E6B2489A277D81789F3F"]})
+        ));
+        // With `threshold`: hash to amount.
+        assert!(validate_result(
             "receivable",
-            &json!({
-                "blocks": [{
-                    "hash": "A",
-                    "amount": "2",
-                    "source": "nano_source"
-                }]
-            }),
-            &json!({"account": "nano_opened"}),
-        );
-        assert_eq!(
-            normalized,
-            json!([{"hash": "A", "amount": "2", "source": "nano_source"}])
-        );
-        assert!(validate_result("receivable", &normalized));
+            &json!({"blocks": {"A": "6000000000000000000000000000000"}})
+        ));
+        // With `source`: hash to amount and source account.
+        assert!(validate_result(
+            "receivable",
+            &json!({"blocks": {"A": {"amount": "6000000000000000000000000000000", "source": "nano_source"}}})
+        ));
+        // A provider that encodes an empty set as an empty string is passed through
+        // rather than rewritten into an array.
+        assert!(validate_result("receivable", &json!({"blocks": ""})));
     }
 
     #[test]
-    fn blocks_info_preserves_object_contents_as_the_canonical_block() {
-        let normalized = normalize_result(
-            "blocks_info",
-            &json!({
-                "blocks": {
-                    "A": {
-                        "block_account": "nano_sender",
-                        "amount": "1",
-                        "balance": "9",
-                        "height": "2",
-                        "confirmed": "true",
-                        "subtype": "send",
-                        "contents": {
-                            "type": "state",
-                            "account": "nano_sender",
-                            "link": "nano_destination"
-                        }
-                    }
+    fn account_info_confirmed_fields_appear_only_when_requested() {
+        // No `include_confirmed`, so no `confirmed_*` fields.
+        let without = json!({
+            "frontier": "A",
+            "open_block": "A",
+            "representative_block": "A",
+            "balance": "9",
+            "modified_timestamp": "1",
+            "block_count": "2",
+            "account_version": "1"
+        });
+        assert!(validate_result("account_info", &without));
+        let with = json!({
+            "frontier": "A",
+            "open_block": "A",
+            "representative_block": "A",
+            "balance": "9",
+            "modified_timestamp": "1",
+            "block_count": "2",
+            "account_version": "1",
+            "confirmed_frontier": "A",
+            "confirmed_balance": "9",
+            "confirmed_height": "2"
+        });
+        assert!(validate_result("account_info", &with));
+        // `confirmation_height` is never synthesized from `confirmed_height`.
+        assert!(with
+            .as_object()
+            .expect("object")
+            .get("confirmation_height")
+            .is_none());
+    }
+
+    #[test]
+    fn block_info_keeps_contents_and_string_valued_confirmed() {
+        // No `hash` (the caller supplied it) and `contents` keeps the node's name.
+        // `json_block` is false by default upstream, so `contents` is a JSON string.
+        let as_string = json!({
+            "block_account": "nano_sender",
+            "amount": "1",
+            "balance": "9",
+            "height": "2",
+            "local_timestamp": "0",
+            "confirmed": "true",
+            "subtype": "send",
+            "contents": "{\"type\":\"state\"}"
+        });
+        assert!(validate_result("block_info", &as_string));
+        let fields = as_string.as_object().expect("object");
+        assert!(fields.get("hash").is_none());
+        assert!(fields.get("block").is_none());
+        // `subtype` is absent for non-state blocks and must stay optional.
+        let mut legacy = as_string.clone();
+        legacy.as_object_mut().expect("object").remove("subtype");
+        assert!(validate_result("block_info", &legacy));
+        // With `json_block` the contents are a subtree.
+        let as_object = json!({
+            "block_account": "nano_sender",
+            "amount": "1",
+            "balance": "9",
+            "height": "2",
+            "local_timestamp": "0",
+            "confirmed": "true",
+            "subtype": "send",
+            "contents": {"type": "state"}
+        });
+        assert!(validate_result("block_info", &as_object));
+    }
+
+    #[test]
+    fn blocks_info_keeps_blocks_not_found_beside_the_block_map() {
+        let upstream = json!({
+            "blocks": {
+                "A": {
+                    "block_account": "nano_sender",
+                    "amount": "1",
+                    "balance": "9",
+                    "height": "2",
+                    "local_timestamp": "0",
+                    "confirmed": "true",
+                    "successor": "B",
+                    "contents": {"type": "state"}
                 }
-            }),
-            &json!({"hashes": ["A"]}),
-        );
-        assert_eq!(normalized["blocks"]["A"]["hash"], "A");
-        assert_eq!(
-            normalized["blocks"]["A"]["block"]["link"],
-            "nano_destination"
-        );
-        assert!(validate_result("blocks_info", &normalized));
-    }
-
-    #[test]
-    fn receivable_blocks_map_supplies_key_as_missing_hash() {
-        let normalized = normalize_result(
-            "receivable",
-            &json!({
-                "blocks": {
-                    "A": {
-                        "amount": "2",
-                        "source": "nano_source"
-                    }
-                }
-            }),
-            &json!({"account": "nano_opened"}),
-        );
-        assert_eq!(
-            normalized,
-            json!([{"hash": "A", "amount": "2", "source": "nano_source"}])
-        );
-        assert!(validate_result("receivable", &normalized));
+            },
+            "blocks_not_found": ["C"]
+        });
+        assert!(validate_result("blocks_info", &upstream));
+        assert_eq!(upstream["blocks"]["A"]["successor"], "B");
+        assert_eq!(upstream["blocks_not_found"][0], "C");
     }
 
     #[test]
@@ -3630,7 +3333,10 @@ node_ws_urls:
     fn websocket_handshake_uses_a_browser_compatible_user_agent() {
         let request = websocket_connect_request("wss://gateway.test/websocket").expect("request");
         assert_eq!(
-            request.headers().get(USER_AGENT).and_then(|value| value.to_str().ok()),
+            request
+                .headers()
+                .get(USER_AGENT)
+                .and_then(|value| value.to_str().ok()),
             Some(WEBSOCKET_USER_AGENT)
         );
     }
@@ -3804,10 +3510,17 @@ node_ws_urls:
             node_rpc_urls: vec!["http://127.0.0.1:1".into(), "http://127.0.0.1:2".into()],
             node_ws_urls: vec!["ws://127.0.0.1:1".into(), "ws://127.0.0.1:2".into()],
             ..Config::default()
-        }).expect("state");
+        })
+        .expect("state");
         assert!(run_ws_bridge(state.clone()).await.is_err());
         assert_eq!(state.native.active_index(), 0);
-        assert!(state.native.unhealthy_until.lock().await.iter().all(|until| *until <= Instant::now()));
+        assert!(state
+            .native
+            .unhealthy_until
+            .lock()
+            .await
+            .iter()
+            .all(|until| *until <= Instant::now()));
     }
 
     #[tokio::test]
@@ -3816,22 +3529,31 @@ node_ws_urls:
             node_rpc_urls: vec!["http://127.0.0.1:1".into(), "http://127.0.0.1:2".into()],
             node_ws_urls: vec!["ws://127.0.0.1:3".into()],
             ..Config::default()
-        }).expect("state");
+        })
+        .expect("state");
         assert!(state.native.call("version", &json!({})).await.is_err());
-        assert_eq!(state.active_ws_url().await.expect("WS unaffected"), (0, "ws://127.0.0.1:3".into()));
+        assert_eq!(
+            state.active_ws_url().await.expect("WS unaffected"),
+            (0, "ws://127.0.0.1:3".into())
+        );
         state.mark_ws_unhealthy(0).await;
         assert!(state.active_ws_url().await.is_err());
     }
 
     #[tokio::test]
     async fn websocket_missing_pong_clears_readiness_and_rotates_only_ws() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
         let address = listener.local_addr().expect("address");
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.expect("client");
             let mut socket = accept_async(stream).await.expect("handshake");
             socket.next().await.expect("subscribe").expect("frame");
-            socket.send(Message::Text(json!({"ack":"subscribe"}).to_string())).await.expect("ack");
+            socket
+                .send(Message::Text(json!({"ack":"subscribe"}).to_string()))
+                .await
+                .expect("ack");
             // Hold the TCP connection open without reading/responding to ping.
             tokio::time::sleep(Duration::from_secs(35)).await;
             drop(socket);
@@ -3839,47 +3561,72 @@ node_ws_urls:
         let state = AppState::new(Config {
             node_ws_urls: vec![format!("ws://{address}"), "ws://127.0.0.1:1".into()],
             ..Config::default()
-        }).expect("state");
+        })
+        .expect("state");
         let error = tokio::time::timeout(
             Duration::from_secs(34),
             run_ws_bridge_with_confirmation_liveness(state.clone(), Duration::from_secs(40)),
         )
-            .await.expect("bounded heartbeat").expect_err("missing pong");
+        .await
+        .expect("bounded heartbeat")
+        .expect_err("missing pong");
         assert!(error.to_string().contains("heartbeat timed out"));
         assert!(!state.upstream_ready.load(Ordering::Relaxed));
         assert_eq!(state.active_ws_url().await.expect("standby").0, 1);
         assert_eq!(state.native.active_index(), 0);
         let events = state.events.replay(None).await.1;
-        assert_eq!(events.last().expect("disconnect reset").data["reason"], "upstream_disconnected");
+        assert_eq!(
+            events.last().expect("disconnect reset").data["reason"],
+            "upstream_disconnected"
+        );
         server.abort();
     }
 
     #[tokio::test]
     async fn websocket_silent_after_ack_rotates_only_ws() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
         let address = listener.local_addr().expect("listener address");
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.expect("client");
             let mut socket = accept_async(stream).await.expect("handshake");
             socket.next().await.expect("subscribe").expect("frame");
-            socket.send(Message::Text(json!({"ack":"subscribe"}).to_string())).await.expect("ack");
+            socket
+                .send(Message::Text(json!({"ack":"subscribe"}).to_string()))
+                .await
+                .expect("ack");
             tokio::time::sleep(Duration::from_secs(1)).await;
         });
         let state = AppState::new(Config {
             node_rpc_urls: vec!["http://127.0.0.1:1".into(), "http://127.0.0.1:2".into()],
             node_ws_urls: vec![format!("ws://{address}"), "ws://127.0.0.1:1".into()],
             ..Config::default()
-        }).expect("state");
+        })
+        .expect("state");
 
-        let error = run_ws_bridge_with_confirmation_liveness(state.clone(), Duration::from_millis(50))
-            .await
-            .expect_err("silent upstream must fail delivery liveness");
+        let error =
+            run_ws_bridge_with_confirmation_liveness(state.clone(), Duration::from_millis(50))
+                .await
+                .expect_err("silent upstream must fail delivery liveness");
 
-        assert!(error.to_string().contains("confirmation delivery timed out"));
+        assert!(error
+            .to_string()
+            .contains("confirmation delivery timed out"));
         assert!(!state.upstream_ready.load(Ordering::Relaxed));
         assert_eq!(state.active_ws_url().await.expect("standby").0, 1);
         assert_eq!(state.native.active_index(), 0);
-        assert_eq!(state.events.replay(None).await.1.last().expect("disconnect reset").data["reason"], "upstream_disconnected");
+        assert_eq!(
+            state
+                .events
+                .replay(None)
+                .await
+                .1
+                .last()
+                .expect("disconnect reset")
+                .data["reason"],
+            "upstream_disconnected"
+        );
         server.abort();
     }
 

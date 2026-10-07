@@ -11,7 +11,8 @@ use futures_util::future::join_all;
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use nano_rpc_gateway::{
-    app, asyncapi_document, generate_signing_key, sign_paseto, AppState, Config, NativeRouter,
+    app, asyncapi_document, generate_signing_key, sign_paseto, AppState, Config, GatewayError,
+    NativeRouter,
 };
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
@@ -32,13 +33,17 @@ async fn start_native_stub() -> String {
                     "confirmation_height_frontier":"A", "confirmed_frontier":"A",
                     "confirmed_balance":"0", "confirmed_height":"1"
                 }),
-                Some("account_balance") => json!({"balance":"0", "pending":"0"}),
+                Some("account_balance") => json!({"balance":"0", "receivable":"0"}),
                 Some("accounts_balances") => json!({"balances": {
-                    "nano_test": {"balance":"0", "pending":"0"}
+                    "nano_test": {"balance":"0", "receivable":"0"}
                 }}),
-                Some("pending") => json!([]),
+                Some("receivable") => json!({"blocks": []}),
                 Some("account_history") => json!({"account":"nano_test", "history": []}),
-                Some("block_info") => json!({"block_account":"nano_test", "amount":"0", "balance":"0", "height":"1", "contents":"{\"type\":\"state\"}"}),
+                Some("block_info") => json!({
+                    "block_account":"nano_test", "amount":"0", "balance":"0",
+                    "height":"1", "local_timestamp":"0", "confirmed":"true",
+                    "subtype":"send", "contents":"{\"type\":\"state\"}"
+                }),
                 Some("blocks_info") => json!({"blocks": {}}),
                 Some("process") if body["block"]["hash"] == "REJECT" => {
                     json!({"error":"Block signature is invalid"})
@@ -138,6 +143,36 @@ async fn rpc(state: AppState, body: &str) -> Value {
     serde_json::from_slice(&bytes).expect("JSON-RPC response")
 }
 
+/// Post a JSON-RPC request and report both the HTTP status and the parsed body.
+/// Transport-level rejections return no JSON-RPC body, so a caller that needs the
+/// status has to read it from the response.
+async fn rpc_status(state: AppState, body: &str, token: Option<&str>) -> (StatusCode, Value) {
+    let mut request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/rpc")
+        .header("content-type", "application/json");
+    if let Some(token) = token {
+        request = request.header("authorization", format!("Bearer {token}"));
+    }
+    let request = request
+        .body(axum::body::Body::from(body.to_owned()))
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    let status = response.status();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("response body")
+        .to_bytes();
+    let body = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
+    (status, body)
+}
+
 async fn rpc_with_auth(state: AppState, body: &str, token: &str) -> Value {
     let request = axum::http::Request::builder()
         .method("POST")
@@ -172,7 +207,7 @@ async fn account_info_translates_native_response() {
 }
 
 #[tokio::test]
-async fn base_profile_matrix_translates_all_public_methods() {
+async fn base_profile_methods_return_the_upstream_result_unchanged() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let cases = [
         ("account_info", json!({"account":"nano_test"}), "frontier"),
@@ -182,7 +217,7 @@ async fn base_profile_matrix_translates_all_public_methods() {
             json!({"accounts":["nano_test"], "include_only_confirmed":true}),
             "balances",
         ),
-        ("receivable", json!({"account":"nano_test"}), "result"),
+        ("receivable", json!({"account":"nano_test"}), "blocks"),
         (
             "account_history",
             json!({"account":"nano_test", "count": 1}),
@@ -198,14 +233,10 @@ async fn base_profile_matrix_translates_all_public_methods() {
         );
         let response = rpc(state.clone(), &request).await;
         assert!(response["error"].is_null(), "{method}: {response}");
-        if result_field == "result" {
-            assert!(response["result"].is_array(), "{method}: {response}");
-        } else {
-            assert!(
-                response["result"].get(result_field).is_some(),
-                "{method}: {response}"
-            );
-        }
+        assert!(
+            response["result"].get(result_field).is_some(),
+            "{method}: {response}"
+        );
         assert_eq!(response["id"], index + 1);
     }
 
@@ -246,7 +277,7 @@ async fn accounts_balances_forwards_a_24_account_native_batch_without_aggregatio
                         account.as_str().expect("account string").to_owned(),
                         json!({
                             "balance": (index + 100).to_string(),
-                            "pending": (index + 200).to_string()
+                            "receivable": (index + 200).to_string()
                         }),
                     )
                 })
@@ -282,6 +313,7 @@ async fn accounts_balances_forwards_a_24_account_native_batch_without_aggregatio
     assert_eq!(balances["nano_watched_23"]["balance"], "123");
     assert_eq!(balances["nano_watched_23"]["receivable"], "223");
     assert!(response["result"].get("balance").is_none());
+    // The deprecated `pending` alias is never requested, so it never appears.
     assert!(!response["result"].to_string().contains("pending"));
 }
 
@@ -430,17 +462,19 @@ async fn native_router_fails_over_after_non_json_retryable_http_status() {
 }
 
 #[tokio::test]
-async fn native_router_fails_over_after_json_rate_limit_error() {
+async fn node_rate_limit_cools_the_upstream_down_without_retrying_elsewhere() {
+    // The node reported the condition, so the caller gets that node's answer rather
+    // than a different node's. The upstream still leaves the rotation.
     let router = NativeRouter::new(&[
         start_json_error_stub("429").await,
         start_native_stub().await,
     ])
     .expect("router");
-    let result = router
+    let error = router
         .call("account_info", &json!({"account":"nano_test"}))
         .await
-        .expect("standby response");
-    assert_eq!(result["frontier"], "A");
+        .expect_err("node-reported rate limit");
+    assert!(matches!(error, GatewayError::NodeRateLimited(reason) if reason == "429"));
     assert_eq!(router.active_index(), 1);
 }
 
@@ -478,8 +512,13 @@ async fn websocket_bridge_uses_standby_after_primary_disconnects() {
     .expect("state");
     let request = axum::http::Request::builder()
         .uri("/events/confirmations?accounts=nano_player")
-        .body(axum::body::Body::empty()).expect("SSE request");
-    let mut body = app(state.clone()).oneshot(request).await.expect("SSE response").into_body();
+        .body(axum::body::Body::empty())
+        .expect("SSE request");
+    let mut body = app(state.clone())
+        .oneshot(request)
+        .await
+        .expect("SSE response")
+        .into_body();
     assert!(nano_rpc_gateway::run_ws_bridge(state.clone())
         .await
         .is_err());
@@ -489,26 +528,46 @@ async fn websocket_bridge_uses_standby_after_primary_disconnects() {
     let transcript = tokio::time::timeout(std::time::Duration::from_secs(1), async {
         let mut transcript = String::new();
         while !transcript.contains("STANDBY") {
-            let bytes = body.frame().await.expect("frame").expect("data").into_data().expect("bytes");
+            let bytes = body
+                .frame()
+                .await
+                .expect("frame")
+                .expect("data")
+                .into_data()
+                .expect("bytes");
             transcript.push_str(std::str::from_utf8(bytes.as_ref()).expect("text"));
         }
         transcript
-    }).await.expect("filtered standby confirmation");
+    })
+    .await
+    .expect("filtered standby confirmation");
     assert!(transcript.contains("nano_player"));
-    assert_eq!(state.native.call("account_info", &json!({"account":"nano_test"})).await.expect("RPC remains healthy")["frontier"], "A");
+    assert_eq!(
+        state
+            .native
+            .call("account_info", &json!({"account":"nano_test"}))
+            .await
+            .expect("RPC remains healthy")["frontier"],
+        "A"
+    );
     assert_eq!(state.native.active_index(), 0);
 }
 
 #[tokio::test]
-async fn upstream_error_response_is_redacted_at_public_rpc_boundary() {
+async fn node_reported_error_is_verbatim_under_one_fixed_code() {
+    // Translation-layer item 2: the node's own error string becomes the message
+    // unchanged, under a single code, with no data payload and no taxonomy.
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let response = rpc(
         state,
         r#"{"jsonrpc":"2.0","method":"account_info","params":{"account":"secret"},"id":1}"#,
     )
     .await;
-    assert_eq!(response["error"]["code"], -32010);
-    assert!(!response.to_string().contains("private request material"));
+    assert_eq!(response["error"]["code"], -32000);
+    assert_eq!(response["error"]["message"], "private request material");
+    assert!(response["error"].get("data").is_none());
+    assert!(!response.to_string().contains("native_reason"));
+    assert!(!response.to_string().contains("upstream_rejection"));
 }
 
 #[tokio::test]
@@ -743,7 +802,10 @@ async fn openrpc_advertises_listen_when_public_url_is_absent() {
         .expect("schema body")
         .to_bytes();
     let document: Value = serde_json::from_slice(&document).expect("schema JSON");
-    assert_eq!(document["servers"][0]["url"], format!("http://{listen}/rpc"));
+    assert_eq!(
+        document["servers"][0]["url"],
+        format!("http://{listen}/rpc")
+    );
 }
 
 #[tokio::test]
@@ -918,7 +980,10 @@ async fn cors_allows_any_origin_when_wildcard_is_configured() {
     config.cors_origins = vec!["*".into()];
     let state = AppState::new(config).expect("state");
 
-    for origin in ["https://playground.open-rpc.org", "https://unexpected.example"] {
+    for origin in [
+        "https://playground.open-rpc.org",
+        "https://unexpected.example",
+    ] {
         let request = axum::http::Request::builder()
             .method("GET")
             .uri("/health")
@@ -941,10 +1006,16 @@ async fn wildcard_cors_still_preflights_the_declared_methods_and_headers() {
         .uri("/rpc")
         .header("origin", "https://unexpected.example")
         .header("access-control-request-method", "POST")
-        .header("access-control-request-headers", "content-type,last-event-id")
+        .header(
+            "access-control-request-headers",
+            "content-type,last-event-id",
+        )
         .body(axum::body::Body::empty())
         .expect("preflight");
-    let response = app(state).oneshot(preflight).await.expect("preflight response");
+    let response = app(state)
+        .oneshot(preflight)
+        .await
+        .expect("preflight response");
     assert_eq!(response.headers()["access-control-allow-origin"], "*");
     let allowed_headers = response.headers()["access-control-allow-headers"]
         .to_str()
@@ -1392,17 +1463,10 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
         .json()
         .await
         .expect("rejected process JSON");
-    assert_eq!(rejected["error"]["code"], -32010);
-    assert_eq!(rejected["error"]["data"]["kind"], "upstream_rejection");
-    assert_eq!(rejected["error"]["data"]["reason"], "invalid_signature");
-    assert_eq!(
-        rejected["error"]["data"]["native_reason"],
-        "Block signature is invalid"
-    );
-    assert_eq!(
-        rejected["error"]["message"],
-        "Process rejected: Invalid block signature"
-    );
+    assert_eq!(rejected["error"]["code"], -32000);
+    assert!(rejected["error"].get("data").is_none());
+    assert_eq!(rejected["error"]["message"], "Block signature is invalid");
+    assert_eq!(rejected["error"]["message"], "Block signature is invalid");
     let gap: Value = client
         .post(format!("{base}/rpc"))
         .bearer_auth(sign_paseto(
@@ -1419,15 +1483,9 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
         .json()
         .await
         .expect("gap process JSON");
-    assert_eq!(gap["error"]["data"]["reason"], "gap_previous");
-    assert_eq!(
-        gap["error"]["data"]["native_reason"],
-        "Block has gap previous"
-    );
-    assert_eq!(
-        gap["error"]["message"],
-        "Process rejected: Previous frontier does not match"
-    );
+    assert_eq!(gap["error"]["code"], -32000);
+    assert!(gap["error"].get("data").is_none());
+    assert_eq!(gap["error"]["message"], "Block has gap previous");
 
     let mut transcript = String::new();
     for _ in 0..8 {
@@ -1655,7 +1713,9 @@ async fn work_generation_authorization_matrix_is_explicit() {
     );
     let state = AppState::new(config).expect("state");
     let request = r#"{"jsonrpc":"2.0","method":"work_generate","params":{"hash":"A","difficulty":"C"},"id":1}"#;
-    assert_eq!(rpc(state.clone(), request).await["error"]["code"], -32001);
+    let (status, body) = rpc_status(state.clone(), request, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "Unauthorized");
     let malformed = rpc_with_auth(
         state.clone(),
         r#"{"jsonrpc":"2.0","method":"work_generate","params":{"hash":"A","difficulty":7},"id":2}"#,
@@ -1670,26 +1730,21 @@ async fn work_generation_authorization_matrix_is_explicit() {
         &json!({"aud":"nano-rpc-gateway","scope":"work","exp":1}),
         &key,
     );
-    assert_eq!(
-        rpc_with_auth(state.clone(), request, &expired).await["error"]["code"],
-        -32001
-    );
+    let (expired_status, _) = rpc_status(state.clone(), request, Some(&expired)).await;
+    assert_eq!(expired_status, StatusCode::UNAUTHORIZED);
     let wrong_audience = sign_paseto(
         &json!({"aud":"other","scope":"work","exp":4_000_000_000u64}),
         &key,
     );
-    assert_eq!(
-        rpc_with_auth(state.clone(), request, &wrong_audience).await["error"]["code"],
-        -32001
-    );
+    let (wrong_audience_status, _) =
+        rpc_status(state.clone(), request, Some(&wrong_audience)).await;
+    assert_eq!(wrong_audience_status, StatusCode::UNAUTHORIZED);
     let common = sign_paseto(
         &json!({"aud":"nano-rpc-gateway","scope":"common","exp":4_000_000_000u64}),
         &key,
     );
-    assert_eq!(
-        rpc_with_auth(state.clone(), request, &common).await["error"]["code"],
-        -32001
-    );
+    let (common_status, _) = rpc_status(state.clone(), request, Some(&common)).await;
+    assert_eq!(common_status, StatusCode::UNAUTHORIZED);
     let work = sign_paseto(
         &json!({"aud":"nano-rpc-gateway","scope":"work","exp":4_000_000_000u64}),
         &key,
@@ -1704,9 +1759,10 @@ async fn work_generation_authorization_matrix_is_explicit() {
         &work,
     )
     .await;
-    assert_eq!(failure["error"]["code"], -32010);
-    assert_eq!(failure["error"]["message"], "Request rejected by upstream");
-    assert_eq!(failure["error"]["data"]["kind"], "upstream_rejection");
+    // The node reported the failure, so its own string is the message verbatim.
+    assert_eq!(failure["error"]["code"], -32000);
+    assert_eq!(failure["error"]["message"], "work unavailable");
+    assert!(failure["error"].get("data").is_none());
 }
 
 #[tokio::test]
@@ -1722,13 +1778,13 @@ async fn base_scoped_token_cannot_call_work_generation() {
         &json!({"aud":"nano-rpc-gateway","sub":"test","scope":"base","exp":4_000_000_000u64}),
         &key,
     );
-    let response = rpc_with_auth(
+    let (status, _) = rpc_status(
         state,
         r#"{"jsonrpc":"2.0","method":"work_generate","params":{"hash":"A"},"id":1}"#,
-        &token,
+        Some(&token),
     )
     .await;
-    assert_eq!(response["error"]["code"], -32001);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -1741,34 +1797,35 @@ async fn work_generation_requires_valid_configured_token() {
     );
     let state = AppState::new(config).expect("state");
 
-    let missing = rpc(
+    let (missing_status, _) = rpc_status(
         state.clone(),
         r#"{"jsonrpc":"2.0","method":"work_generate","params":{"hash":"A"},"id":1}"#,
+        None,
     )
     .await;
-    assert_eq!(missing["error"]["code"], -32001);
+    assert_eq!(missing_status, StatusCode::UNAUTHORIZED);
 
     let expired = sign_paseto(
         &json!({"aud":"nano-rpc-gateway","sub":"test","scope":"work","exp":1}),
         &key,
     );
-    let expired_response = rpc_with_auth(
+    let (expired_status, _) = rpc_status(
         state.clone(),
         r#"{"jsonrpc":"2.0","method":"work_generate","params":{"hash":"A"},"id":2}"#,
-        &expired,
+        Some(&expired),
     )
     .await;
-    assert_eq!(expired_response["error"]["code"], -32001);
+    assert_eq!(expired_status, StatusCode::UNAUTHORIZED);
 
     let wrong_audience = sign_paseto(
         &json!({"aud":"other","sub":"test","scope":"work","exp":4_000_000_000u64}),
         &key,
     );
-    let wrong_response = rpc_with_auth(
+    let (wrong_status, _) = rpc_status(
         state,
         r#"{"jsonrpc":"2.0","method":"work_generate","params":{"hash":"A"},"id":3}"#,
-        &wrong_audience,
+        Some(&wrong_audience),
     )
     .await;
-    assert_eq!(wrong_response["error"]["code"], -32001);
+    assert_eq!(wrong_status, StatusCode::UNAUTHORIZED);
 }
