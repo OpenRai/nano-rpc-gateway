@@ -45,6 +45,25 @@ async fn start_native_stub() -> String {
                     "subtype":"send", "contents":"{\"type\":\"state\"}"
                 }),
                 Some("blocks_info") => json!({"blocks": {}}),
+                Some("accounts_frontiers")
+                    if body["accounts"].as_array().is_some_and(|accounts| {
+                        accounts.iter().all(|account| account == "nano_missing")
+                    }) =>
+                {
+                    // The node omits `frontiers` entirely when every account failed.
+                    json!({"errors": {"nano_missing": "Account not found"}})
+                }
+                Some("accounts_frontiers") => json!({"frontiers": {
+                    "nano_test": "A", "nano_other": "B"
+                }}),
+                Some("accounts_receivable") if body["source"] == true => json!({"blocks": {
+                    "nano_test": {"C": {"amount": "1", "source": "nano_sender"}}
+                }}),
+                Some("accounts_receivable") if body["threshold"].is_string() => json!({"blocks": {
+                    "nano_test": {"C": "1"}
+                }}),
+                Some("accounts_receivable") => json!({"blocks": {"nano_test": ["C"]}}),
+                Some("block_confirm") => json!({"started": "1"}),
                 Some("process") if body["block"]["hash"] == "REJECT" => {
                     json!({"error":"Block signature is invalid"})
                 }
@@ -242,7 +261,7 @@ async fn base_profile_methods_return_the_upstream_result_unchanged() {
 
     let invalid_history = rpc(
         state.clone(),
-        r#"{"jsonrpc":"2.0","method":"account_history","params":{"account":"nano_test","count":0},"id":7}"#,
+        r#"{"jsonrpc":"2.0","method":"account_history","params":{"account":"nano_test","count":-2},"id":7}"#,
     )
     .await;
     assert_eq!(invalid_history["error"]["code"], -32602);
@@ -1828,4 +1847,143 @@ async fn work_generation_requires_valid_configured_token() {
     )
     .await;
     assert_eq!(wrong_status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn accounts_frontiers_returns_the_node_shape_and_omits_frontiers_when_all_fail() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let response = rpc(
+        state.clone(),
+        r#"{"jsonrpc":"2.0","method":"accounts_frontiers","params":{"accounts":["nano_test","nano_other"]},"id":1}"#,
+    )
+    .await;
+    assert!(response["error"].is_null(), "{response}");
+    assert_eq!(response["result"]["frontiers"]["nano_test"], "A");
+    assert_eq!(response["result"]["frontiers"]["nano_other"], "B");
+    assert!(response["result"].get("errors").is_none());
+
+    // The node omits `frontiers` entirely when every requested account failed.
+    let all_failed = rpc(
+        state,
+        r#"{"jsonrpc":"2.0","method":"accounts_frontiers","params":{"accounts":["nano_missing"]},"id":2}"#,
+    )
+    .await;
+    assert!(all_failed["error"].is_null(), "{all_failed}");
+    assert!(all_failed["result"].get("frontiers").is_none());
+    assert_eq!(
+        all_failed["result"]["errors"]["nano_missing"],
+        "Account not found"
+    );
+}
+
+#[tokio::test]
+async fn accounts_receivable_reproduces_each_documented_result_shape() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let request = |params: Value| {
+        let state = state.clone();
+        async move {
+            rpc(
+                state,
+                &json!({"jsonrpc":"2.0","method":"accounts_receivable","params":params,"id":1})
+                    .to_string(),
+            )
+            .await
+        }
+    };
+
+    // Default: an array of hashes.
+    let default = request(json!({"accounts": ["nano_test"]})).await;
+    assert!(default["error"].is_null(), "{default}");
+    assert_eq!(default["result"]["blocks"]["nano_test"][0], "C");
+
+    // `threshold`: hash to amount.
+    let threshold = request(json!({"accounts": ["nano_test"], "threshold": "1"})).await;
+    assert!(threshold["error"].is_null(), "{threshold}");
+    assert_eq!(threshold["result"]["blocks"]["nano_test"]["C"], "1");
+
+    // `source`: hash to amount and source account.
+    let source = request(json!({"accounts": ["nano_test"], "source": true})).await;
+    assert!(source["error"].is_null(), "{source}");
+    assert_eq!(source["result"]["blocks"]["nano_test"]["C"]["amount"], "1");
+    assert_eq!(
+        source["result"]["blocks"]["nano_test"]["C"]["source"],
+        "nano_sender"
+    );
+}
+
+#[tokio::test]
+async fn block_confirm_reports_started_and_is_guarded_at_the_transport_layer() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let hash = "A".repeat(64);
+    let response = rpc(
+        state.clone(),
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"block_confirm","params":{{"hash":"{hash}"}},"id":1}}"#
+        ),
+    )
+    .await;
+    assert!(response["error"].is_null(), "{response}");
+    assert_eq!(response["result"]["started"], "1");
+
+    // A malformed hash is refused before it reaches the node.
+    let (status, _) = rpc_status(
+        state.clone(),
+        r#"{"jsonrpc":"2.0","method":"block_confirm","params":{"hash":"not-a-hash"},"id":2}"#,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A hash still inside its cooldown is refused with 429 and a Retry-After, and the
+    // refusal is a transport error: no JSON-RPC body, and never a synthetic `started`.
+    let (cooldown_status, cooldown_body) = rpc_status(
+        state,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"block_confirm","params":{{"hash":"{hash}"}},"id":3}}"#
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(cooldown_status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(cooldown_body.get("result").is_none());
+    assert!(cooldown_body.get("started").is_none());
+}
+
+#[tokio::test]
+async fn block_confirm_rate_limit_is_separate_from_the_read_budget() {
+    // The bucket is sized for a burst, so exhausting it proves the guard is real
+    // without waiting for a refill.
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let mut refused = 0;
+    for index in 0..8 {
+        let (status, _) = rpc_status(
+            state.clone(),
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"block_confirm","params":{{"hash":"{:064}"}},"id":{}}}"#,
+                index, index
+            ),
+            None,
+        )
+        .await;
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            refused += 1;
+        }
+    }
+    assert!(
+        refused > 0,
+        "expected the bucket to be exhausted, got {refused}"
+    );
+}
+
+#[tokio::test]
+async fn account_history_paginates_with_head_and_reports_previous() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let response = rpc(
+        state,
+        r#"{"jsonrpc":"2.0","method":"account_history","params":{"account":"nano_test","head":"A","count":-1,"reverse":true,"raw":true},"id":1}"#,
+    )
+    .await;
+    assert!(response["error"].is_null(), "{response}");
+    assert_eq!(response["result"]["account"], "nano_test");
+    assert!(response["result"]["history"].is_array());
 }

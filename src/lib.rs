@@ -489,7 +489,7 @@ pub fn registry() -> Vec<MethodSpec> {
         MethodSpec {
             name: "receivable",
             scope: Scope::Base,
-            params: "AccountParams",
+            params: "ReceivableParams",
             result: "ReceivableResult",
             description: "Read receivable blocks for an account.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
@@ -497,7 +497,7 @@ pub fn registry() -> Vec<MethodSpec> {
         MethodSpec {
             name: "account_balance",
             scope: Scope::Base,
-            params: "AccountParams",
+            params: "AccountBalanceParams",
             result: "AccountBalanceResult",
             description: "Read balance and receivable state for one account.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
@@ -532,6 +532,30 @@ pub fn registry() -> Vec<MethodSpec> {
             params: "BlocksParams",
             result: "BlocksInfoResult",
             description: "Read metadata for several blocks.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
+        },
+        MethodSpec {
+            name: "accounts_frontiers",
+            scope: Scope::Base,
+            params: "AccountsFrontiersParams",
+            result: "AccountsFrontiersResult",
+            description: "Read the head block hash for each account.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
+        },
+        MethodSpec {
+            name: "accounts_receivable",
+            scope: Scope::Base,
+            params: "AccountsReceivableParams",
+            result: "AccountsReceivableResult",
+            description: "Read receivable blocks for several accounts.",
+            schema_provenance: "profiles/nano-node-v28.2.yaml",
+        },
+        MethodSpec {
+            name: "block_confirm",
+            scope: Scope::Base,
+            params: "BlockConfirmParams",
+            result: "BlockConfirmResult",
+            description: "Request confirmation for a block from online representatives.",
             schema_provenance: "profiles/nano-node-v28.2.yaml",
         },
         MethodSpec {
@@ -712,7 +736,20 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
                 "method": "block_info",
                 "params": {"hash": "process result hash"},
                 "confirmed_field": "result.confirmed",
-                "suggested_delay_seconds": 5
+                "suggested_delay_seconds": 5,
+                "sequence": [
+                    "Wait about 5 seconds after a block of interest.",
+                    "Call block_info with the hash and read result.confirmed.",
+                    "If it is false, call block_confirm with the hash.",
+                    "Expect a confirmation notification, then call block_info again.",
+                    "Escalate any remaining delay in your own systems."
+                ],
+                "escalation": {
+                    "method": "block_confirm",
+                    "params": {"hash": "process result hash"},
+                    "result": {"started": "Always the string 1. It reports that no error occurred, never that the block confirmed. The call also re-fires confirmation notifications for a block that is already confirmed."},
+                    "rate_limited": "An operator guard answers HTTP 429 with Retry-After and no JSON-RPC body."
+                }
             }
         },
         "x-nano-account-tracking": {
@@ -721,7 +758,16 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
                 "method": "accounts_balances",
                 "params": {"accounts": "the watched accounts", "include_only_confirmed": true},
                 "result": {"balances": "per-account balance and receivable values"},
-                "when": "Seed state once, then refresh in one batch after a matching confirmation or stream reset; do not poll."
+                "when": "Read balance and receivable totals after a matching confirmation. This cannot detect every change: it returns no hashes, and a representative-change block leaves the balance unchanged. Use the frontier delta sequence below when you need to detect changes rather than totals."
+            },
+            "frontier_delta": {
+                "when": "The canonical refresh. Three batch calls plus one account_history per changed account, whatever the size of the account set.",
+                "steps": [
+                    "accounts_frontiers with accounts: compare each result against the stored frontier hash.",
+                    "account_history with head set to the stored hash, reverse true and raw true, for each changed account. head is inclusive, so the first entry is the head block itself: dedupe by hash rather than dropping entry 0. raw is required because the summary form skips change and epoch blocks.",
+                    "accounts_receivable with source, for incoming blocks that are not yet received.",
+                    "blocks_info with the new frontier hashes, and read confirmed. If false, escalate with block_confirm."
+                ]
             },
             "frontier_confirmation": {
                 "method": "account_info",
@@ -804,6 +850,260 @@ fn reset_params(reason: &str, profile: &str) -> Value {
     json!({"reason": reason, "profile": profile, "reconcile": "Query authoritative Nano RPC state before applying new confirmations"})
 }
 
+/// The component schemas for the pinned profile.
+///
+/// Each schema is built as its own literal and collected into a map. Keeping them
+/// separate keeps any single macro invocation small, and makes each definition
+/// reviewable on its own against the upstream documentation.
+fn component_schemas() -> serde_json::Map<String, Value> {
+    let mut schemas = serde_json::Map::new();
+    let mut add = |name: &str, schema: Value| {
+        schemas.insert(name.to_owned(), schema);
+    };
+
+    add(
+        "AccountParams",
+        json!({"type":"object","required":["account"],"properties":{"account":{"type":"string","minLength":1}}}),
+    );
+    add(
+        "AccountsParams",
+        json!({"type":"object","required":["accounts"],"properties":{
+            "accounts":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
+            "include_only_confirmed":{"type":"boolean","default":true,"description":"Only count blocks whose confirmation height is up to date."}}}),
+    );
+    add(
+        "AccountInfoParams",
+        json!({"type":"object","required":["account"],"properties":{
+            "account":{"type":"string","minLength":1},
+            "representative":{"type":"boolean","default":false,"description":"Add the representative account."},
+            "weight":{"type":"boolean","default":false,"description":"Add the account's voting weight."},
+            "receivable":{"type":"boolean","default":false,"description":"Add the receivable total, plus confirmed_receivable when include_confirmed is also set."},
+            "include_confirmed":{"type":"boolean","default":false,"description":"Add the confirmed_ fields. Without it the response carries no confirmed_* fields."}}}),
+    );
+    add(
+        "AccountBalanceParams",
+        json!({"type":"object","required":["account"],"properties":{
+            "account":{"type":"string","minLength":1},
+            "include_only_confirmed":{"type":"boolean","default":true,"description":"Report only blocks whose confirmation height is up to date."}}}),
+    );
+    add(
+        "ReceivableParams",
+        json!({"type":"object","required":["account"],"properties":{
+            "account":{"type":"string","minLength":1},
+            "count":{"type":"integer","description":"Maximum number of blocks to return."},
+            "threshold":{"type":"string","description":"Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape."},
+            "source":{"type":"boolean","default":false,"description":"Include the sending account with each block. Selects the hash-to-object result shape."},
+            "include_active":{"type":"boolean","default":false,"description":"Include blocks without a finished confirmation."},
+            "min_version":{"type":"integer","description":"Only return blocks that this version (epoch) or later can pocket."},
+            "sorting":{"type":"boolean","default":false,"description":"Sort blocks by amount, descending."},
+            "include_only_confirmed":{"type":"boolean","default":true,"description":"Only return blocks whose confirmation height is up to date."}}}),
+    );
+    add(
+        "AccountsFrontiersParams",
+        json!({"type":"object","required":["accounts"],"properties":{
+            "accounts":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}}),
+    );
+    add(
+        "BlockConfirmParams",
+        json!({"type":"object","required":["hash"],"properties":{
+            "hash":{"type":"string","minLength":1,"description":"The block to ask online representatives about."}}}),
+    );
+    add(
+        "AccountsReceivableParams",
+        json!({"type":"object","required":["accounts"],"properties":{
+            "accounts":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
+            "count":{"type":"integer","description":"Maximum number of blocks to return per account."},
+            "threshold":{"type":"string","description":"Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape."},
+            "source":{"type":"boolean","default":false,"description":"Include the sending account with each block. Selects the hash-to-object result shape."},
+            "include_active":{"type":"boolean","default":false,"description":"Include blocks without a finished confirmation."},
+            "sorting":{"type":"boolean","default":false,"description":"Sort each account's blocks by amount, descending."},
+            "include_only_confirmed":{"type":"boolean","default":true,"description":"Only return blocks whose confirmation height is up to date."}}}),
+    );
+    add(
+        "AccountHistoryParams",
+        json!({"type":"object","required":["account"],"properties":{
+            "account":{"type":"string","minLength":1},
+            "head":{"type":"string","minLength":64,"maxLength":64,"description":"Start from this block instead of the account's latest, and include it as the first entry. Use it to paginate."},
+            "count":{"type":"integer","description":"Maximum number of entries. -1 returns the whole chain."},
+            "offset":{"type":"integer","description":"Skip this many blocks, starting from head when given."},
+            "reverse":{"type":"boolean","default":false,"description":"Walk forward from head toward the frontier instead of backward. The response reports `next` in place of `previous`."},
+            "raw":{"type":"boolean","default":false,"description":"Return full block content instead of a send/receive summary. Required to see change and epoch blocks, which the summary skips."},
+            "account_filter":{"type":"array","items":{"type":"string","minLength":1},"description":"Only return entries connected to these accounts."},
+            "include_linked_account":{"type":"boolean","default":false,"description":"Add `linked_account` to each entry, or \"0\" when there is none or the block is pruned."}}}),
+    );
+    add(
+        "BlockParams",
+        json!({"type":"object","required":["hash"],"properties":{
+            "hash":{"type":"string","minLength":1},
+            "json_block":{"type":"boolean","default":false,"description":"Return `contents` as a JSON subtree instead of a JSON string."},
+            "include_linked_account":{"type":"boolean","default":false,"description":"Add `linked_account`, or \"0\" when there is none or the block is pruned."}}}),
+    );
+    add(
+        "BlocksParams",
+        json!({"type":"object","required":["hashes"],"properties":{
+            "hashes":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
+            "json_block":{"type":"boolean","default":false,"description":"Return `contents` as a JSON subtree instead of a JSON string."},
+            "include_not_found":{"type":"boolean","default":false,"description":"Report unknown hashes in `blocks_not_found` instead of failing."},
+            "receive_hash":{"type":"boolean","default":false,"description":"For send blocks, add the matching receive block hash."},
+            "source":{"type":"boolean","default":false,"description":"Add `source_account` for receive and open blocks, and \"0\" for send and change blocks."},
+            "include_linked_account":{"type":"boolean","default":false,"description":"Add `linked_account`, or \"0\" when there is none or the block is pruned."}}}),
+    );
+    add(
+        "ProcessParams",
+        json!({"type":"object","required":["block"],"properties":{
+            "block":{"type":"object","additionalProperties":true},
+            "subtype":{"type":"string","enum":["send","receive","open","change","epoch"],"description":"Extra check on the block's intent. Strongly recommended, and required in a future node version."},
+            "force":{"type":"boolean","default":false,"description":"Force fork resolution when the block is not accepted as the fork."},
+            "async":{"type":"boolean","default":false,"description":"Queue the block and return `started` immediately instead of waiting. The outcome arrives on the `new_unconfirmed_block` topic."},
+            "json_block":{"type":"boolean","default":false,"description":"Send `block` as a JSON subtree instead of a JSON string."}}}),
+    );
+    add(
+        "EmptyParams",
+        json!({"type":"object","properties":{},"additionalProperties":false}),
+    );
+
+    add(
+        "VersionResult",
+        json!({"type":"object","required":["rpc_version"],"properties":{
+            "rpc_version":{"type":"string"},
+            "store_version":{"type":"string"},
+            "protocol_version":{"type":"string"},
+            "node_vendor":{"type":"string"},
+            "store_vendor":{"type":"string"},
+            "network":{"type":"string"},
+            "network_identifier":{"type":"string","description":"Hash of the genesis open block."},
+            "build_info":{"type":"string"}}}),
+    );
+    add(
+        "BlockCountResult",
+        json!({"type":"object","required":["count","unchecked","cemented"],"properties":{
+            "count":{"type":"string"},"unchecked":{"type":"string"},"cemented":{"type":"string"}}}),
+    );
+    add(
+        "AccountInfoResult",
+        json!({"type":"object","required":["frontier","open_block","representative_block","balance","modified_timestamp","block_count","account_version"],"description":"Fields beyond this set appear only when the matching request parameter is set.","properties":{
+            "frontier":{"type":"string","description":"Current frontier hash. It can be ahead of cemented state."},
+            "open_block":{"type":"string"},
+            "representative_block":{"type":"string"},
+            "balance":{"type":"string","description":"Balance at frontier, in raw. It can include unconfirmed state."},
+            "modified_timestamp":{"type":"string"},
+            "block_count":{"type":"string"},
+            "account_version":{"type":"string"},
+            "confirmation_height":{"type":"string","description":"Cemented blocks on the account chain."},
+            "confirmation_height_frontier":{"type":"string","description":"The block hash at confirmation_height."},
+            "representative":{"type":"string","description":"Present when `representative` was requested."},
+            "weight":{"type":"string","description":"Present when `weight` was requested."},
+            "receivable":{"type":"string","description":"Present when `receivable` was requested."},
+            "confirmed_frontier":{"type":"string","description":"Present when `include_confirmed` was requested. Confirm a frontier with blocks_info before treating it as final."},
+            "confirmed_balance":{"type":"string","description":"Present when `include_confirmed` was requested."},
+            "confirmed_height":{"type":"string","description":"Present when `include_confirmed` was requested. Same value as confirmation_height."},
+            "confirmed_representative":{"type":"string","description":"Present when both `representative` and `include_confirmed` were requested."},
+            "confirmed_receivable":{"type":"string","description":"Present when both `receivable` and `include_confirmed` were requested."}}}),
+    );
+    add(
+        "AccountBalanceResult",
+        json!({"type":"object","required":["balance","receivable"],"properties":{
+            "balance":{"type":"string","description":"Balance in raw. Confirmed only when include_only_confirmed is true."},
+            "receivable":{"type":"string","description":"Incoming amount not yet received, in raw."}}}),
+    );
+    add(
+        "AccountsBalancesResult",
+        json!({"type":"object","description":"Both maps are optional; the node omits one when no entry applies to it. An account absent from the ledger reports a zero balance and zero receivable rather than an error.","properties":{
+            "balances":{"type":"object","description":"One entry per requested account. This is not an aggregate.","additionalProperties":{"$ref":"#/components/schemas/AccountBalanceResult"}},
+            "errors":{"type":"object","description":"Per-account error message.","additionalProperties":{"type":"string"}}}}),
+    );
+    add(
+        "AccountsFrontiersResult",
+        json!({"type":"object","description":"Both maps are optional. The node omits `frontiers` when every requested account failed and omits `errors` when none did. A head block can be unconfirmed, so confirm it with blocks_info and read `confirmed` before treating it as final.","properties":{
+            "frontiers":{"type":"object","description":"Account to head block hash.","additionalProperties":{"type":"string"}},
+            "errors":{"type":"object","description":"Account to the node's message for that account.","additionalProperties":{"type":"string"}}}}),
+    );
+    add(
+        "BlockInfoResult",
+        json!({"type":"object","required":["block_account","amount","balance","height","local_timestamp","confirmed"],"description":"`subtype` is present for state blocks only, and is the source of truth for a state block's kind.","properties":{
+            "block_account":{"type":"string","description":"Account that owns the block."},
+            "amount":{"type":"string","description":"Block amount in raw."},
+            "balance":{"type":"string","description":"Account balance after this block, in raw."},
+            "height":{"type":"string"},
+            "local_timestamp":{"type":"string"},
+            "confirmed":{"type":"string","description":"\"true\" only when the node reports the block cemented."},
+            "successor":{"type":"string","description":"The block that superseded this one."},
+            "subtype":{"type":"string","enum":["send","receive","change","epoch"]},
+            "contents":{"description":"Block content. A JSON string unless `json_block` was requested."},
+            "linked_account":{"type":"string","description":"Present when include_linked_account was requested; \"0\" when there is none."},
+            "source_account":{"type":"string"},
+            "receive_hash":{"type":"string"}}}),
+    );
+    add(
+        "BlocksInfoResult",
+        json!({"type":"object","required":["blocks"],"properties":{
+            "blocks":{"type":"object","additionalProperties":{"$ref":"#/components/schemas/BlockInfoResult"}},
+            "blocks_not_found":{"type":"array","items":{"type":"string"},"description":"Present when include_not_found was requested."}}}),
+    );
+    add(
+        "BlockConfirmResult",
+        json!({"type":"object","required":["started"],"properties":{
+            "started":{"type":"string","const":"1"}}}),
+    );
+    add(
+        "ProcessResult",
+        json!({"oneOf":[
+            {"type":"object","required":["hash"],"properties":{"hash":{"type":"string"}}},
+            {"type":"object","required":["started"],"description":"Returned when `async` was requested. The block was queued, not processed; the outcome arrives on the `new_unconfirmed_block` topic.","properties":{"started":{"type":"string","const":"1"}}}]}),
+    );
+    add(
+        "HistoryEntry",
+        json!({"type":"object","required":["type","account","amount","hash"],"description":"Without `raw`, `type` is `send` or `receive` and change and epoch blocks are skipped. With `raw`, it is the block type and every block field is present. For an open block in raw mode, `account` is the source block's account.","properties":{
+            "type":{"type":"string"},
+            "account":{"type":"string"},
+            "amount":{"type":"string"},
+            "local_timestamp":{"type":"string"},
+            "height":{"type":"string"},
+            "hash":{"type":"string"},
+            "confirmed":{"type":"string","description":"\"true\" when the node reports the entry cemented."},
+            "subtype":{"type":"string","description":"State blocks only. The source of truth for the block's kind."},
+            "linked_account":{"type":"string","description":"Present when include_linked_account was requested."},
+            "previous":{"type":"string","description":"Hash of the preceding block on the account chain."},
+            "representative":{"type":"string"},
+            "balance":{"type":"string"},
+            "link":{"type":"string"},
+            "link_as_account":{"type":"string"},
+            "signature":{"type":"string"},
+            "work":{"type":"string"}}}),
+    );
+    add(
+        "AccountHistoryResult",
+        json!({"type":"object","required":["account","history"],"properties":{
+            "account":{"type":"string"},
+            "history":{"type":"array","items":{"$ref":"#/components/schemas/HistoryEntry"}},
+            "previous":{"type":"string","description":"Present only when `count` truncated the result: the hash to pass as the next `head`."},
+            "next":{"type":"string","description":"Present in place of `previous` when `reverse` was requested."}}}),
+    );
+    add(
+        "ReceivableSource",
+        json!({"type":"object","required":["amount","source"],"properties":{
+            "amount":{"type":"string"},"source":{"type":"string"}}}),
+    );
+    add(
+        "ReceivableBlocks",
+        json!({"description":"The node selects one of three shapes from the request parameters: an array of hashes by default, hash to amount with `threshold`, and hash to amount and source account with `source`.","oneOf":[
+            {"type":"array","items":{"type":"string"}},
+            {"type":"object","additionalProperties":{"type":"string"}},
+            {"type":"object","additionalProperties":{"$ref":"#/components/schemas/ReceivableSource"}}]}),
+    );
+    add(
+        "ReceivableResult",
+        json!({"type":"object","required":["blocks"],"properties":{
+            "blocks":{"$ref":"#/components/schemas/ReceivableBlocks"}}}),
+    );
+    add(
+        "AccountsReceivableResult",
+        json!({"type":"object","required":["blocks"],"properties":{
+            "blocks":{"type":"object","description":"Account to that account's receivable blocks.","additionalProperties":{"$ref":"#/components/schemas/ReceivableBlocks"}}}}),
+    );
+    schemas
+}
+
 fn build_openrpc_document(
     profile: &str,
     include_work: bool,
@@ -827,79 +1127,22 @@ fn build_openrpc_document(
         "openrpc": "1.3.2", "info": {"title":"Nano Gateway", "version":"0.1.0", "description":"JSON-RPC 2.0 adapter for a pinned Nano node profile."},
         "servers": [{"name":"gateway", "url":gateway_url, "variables":{"gatewayUrl":{"default":gateway_url}}}],
         "methods": methods,
-        "components": {"schemas": {
-            "AccountParams":{"type":"object","required":["account"],"properties":{"account":{"type":"string","minLength":1}}},
-            "AccountInfoParams":{"$ref":"#/components/schemas/AccountParams"},
-            "AccountsParams":{"type":"object","required":["accounts"],"properties":{"accounts":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},"include_only_confirmed":{"type":"boolean","default":true}}},
-            "EmptyParams":{"type":"object","properties":{},"additionalProperties":false},
-            "VersionResult":{"type":"object","required":["rpc_version"],"properties":{"rpc_version":{"type":"string"}}},
-            "BlockCountResult":{"type":"object","required":["count","unchecked","cemented"],"properties":{"count":{"type":"string"},"unchecked":{"type":"string"},"cemented":{"type":"string"}}},
-            "AccountBalanceResult":{"type":"object","required":["balance","receivable"],"properties":{"balance":{"type":"string","description":"Confirmed account balance in RAW when include_only_confirmed is true."},"receivable":{"type":"string","description":"Confirmed incoming amount not yet received, in RAW."}}},
-            "AccountsBalancesResult":{"type":"object","required":["balances"],"properties":{"balances":{"type":"object","description":"Map from each requested account to its own balance and receivable values; this is not an aggregate.","additionalProperties":{"$ref":"#/components/schemas/AccountBalanceResult"}},"errors":{"type":"object","description":"Per-account native validation errors, when supplied by the node.","additionalProperties":{"type":"string"}}}},
-            "AccountHistoryResult":{"type":"object","required":["account","history"],"properties":{"account":{"type":"string"},"history":{"type":"array","items":true}}},
-            "AccountInfoResult":{"type":"object","required":["opened","frontier","open_block","representative_block","balance","confirmed_frontier","confirmed_balance","confirmation_height","confirmation_height_frontier"],"properties":{"opened":{"type":"boolean","description":"False when the account has not opened on the ledger."},"frontier":{"oneOf":[{"type":"string"},{"type":"null"}],"description":"Current frontier hash. It can be ahead of cemented state."},"open_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"representative_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"balance":{"type":"string","description":"Current frontier balance in RAW. It can include unconfirmed state."},"confirmed_frontier":{"oneOf":[{"type":"string"},{"type":"null"}],"description":"Hash of the cemented frontier. Use this hash for account-frontier confirmation status."},"confirmed_balance":{"type":"string","description":"Balance at confirmed_frontier in RAW."},"confirmation_height":{"type":"string","description":"Number of cemented blocks on the account chain."},"confirmation_height_frontier":{"oneOf":[{"type":"string"},{"type":"null"}],"description":"Cemented frontier hash reported by the node."}}},
-            "ReceivableEntry":{"type":"object","required":["source","hash","amount"],"properties":{"source":{"type":"string"},"hash":{"type":"string"},"amount":{"type":"string"}}},
-            "ReceivableResult":{"type":"array","items":{"$ref":"#/components/schemas/ReceivableEntry"}},
-            "AccountHistoryParams":{"type":"object","required":["account"],"properties":{"account":{"type":"string","minLength":1},"count":{"type":"integer","minimum":1}}},
-            "BlockParams":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string","minLength":1}}},
-            "BlockInfoResult":{"type":"object","required":["hash","block_account","amount","balance","height","subtype","confirmed","block"],"properties":{"hash":{"type":"string","description":"Queried block hash."},"block_account":{"type":"string","description":"Account that owns the block."},"amount":{"type":"string","description":"Block amount in RAW."},"balance":{"type":"string","description":"Account balance after this block, in RAW."},"height":{"type":"string"},"subtype":{"type":"string"},"confirmed":{"type":"boolean","description":"True only when the node reports that the block is cemented."},"block":{"type":"object","description":"Native block content.","additionalProperties":true}}},
-            "BlocksParams":{"type":"object","required":["hashes"],"properties":{"hashes":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
-            "BlocksInfoResult":{"type":"object","required":["blocks"],"properties":{"blocks":{"type":"object","additionalProperties":{"$ref":"#/components/schemas/BlockInfoResult"}}}},
-            "ProcessParams":{"type":"object","required":["block"],"properties":{"block":{"type":"object","additionalProperties":true}}}, "ProcessResult":{"type":"object","required":["hash"],"properties":{"hash":{"type":"string"}}},
-            "WorkGenerateParams":{"type":"object","required":["hash","difficulty"],"properties":{"hash":{"type":"string","minLength":1},"difficulty":{"type":"string","minLength":1}}}, "WorkGenerateResult":{"type":"object","required":["hash","work","difficulty","multiplier"],"properties":{"hash":{"type":"string"},"work":{"type":"string"},"difficulty":{"type":"string"},"multiplier":{"type":"string"}}}
-        }, "errors": {
+        "components": {"schemas": component_schemas()}, "errors": {
             "InvalidRequest": {"code": -32602, "message": "Invalid method parameters"},
             "MethodNotFound": {"code": -32601, "message": "Method not found"},
-            "Unauthorized": {"code": -32001, "message": "Unauthorized"},
-            "UpstreamFailure": {"code": -32000, "message": "Upstream request failed"},
-            "UpstreamIndeterminate": {"code": -32002, "message": "Upstream outcome is indeterminate"},
-            "UpstreamRejection": {"code": -32010, "message": "Request rejected by upstream; process responses include normalized reason and native_reason fields in error.data"}
-        }}, "x-nano-profile": profile
+            "NodeError": {"code": -32000, "message": "The node reported an error. This is the only code the gateway uses for node-reported errors, and the message is the node's own string unchanged."},
+            "UpstreamUnavailable": {"code": -32000, "message": "The node could not be reached. The call may or may not have been processed."}
+        }, "x-nano-profile": profile
     })
 }
 
 fn openrpc_method(method: MethodSpec) -> Value {
-    let params = match method.name {
-        "receivable" | "account_info" | "account_balance" => vec![json!({
-            "name": "account",
-            "required": true,
-            "schema": {"type": "string"}
-        })],
-        "accounts_balances" => vec![
-            json!({"name": "accounts", "required": true, "schema": {"type": "array", "minItems": 1, "items": {"type": "string"}}}),
-            json!({"name": "include_only_confirmed", "required": false, "schema": {"type": "boolean", "default": true}}),
-        ],
-        "account_history" => vec![
-            json!({"name": "account", "required": true, "schema": {"type": "string"}}),
-            json!({"name": "count", "required": false, "schema": {"type": "integer"}}),
-        ],
-        "block_info" => vec![json!({
-            "name": "hash",
-            "required": true,
-            "schema": {"type": "string"}
-        })],
-        "blocks_info" => vec![json!({
-            "name": "hashes",
-            "required": true,
-            "schema": {"type": "array", "items": {"type": "string"}}
-        })],
-        "process" => vec![json!({
-            "name": "block",
-            "required": true,
-            "schema": {"type": "object"}
-        })],
-        "work_generate" => vec![
-            json!({"name": "hash", "required": true, "schema": {"type": "string"}}),
-            json!({"name": "difficulty", "required": true, "schema": {"type": "string"}}),
-        ],
-        _ => Vec::new(),
-    };
     let mut document = json!({
         "name": method.name,
         "summary": method.description,
         "x-nano-schema-provenance": method.schema_provenance,
         "paramStructure": "by-name",
-        "params": params,
+        "params": openrpc_params(method.params),
         "result": {
             "name": "result",
             "schema": {"$ref": format!("#/components/schemas/{}", method.result)}
@@ -907,10 +1150,8 @@ fn openrpc_method(method: MethodSpec) -> Value {
         "errors": [
             {"$ref":"#/components/errors/InvalidRequest"},
             {"$ref":"#/components/errors/MethodNotFound"},
-            {"$ref":"#/components/errors/Unauthorized"},
-            {"$ref":"#/components/errors/UpstreamFailure"},
-            {"$ref":"#/components/errors/UpstreamIndeterminate"},
-            {"$ref":"#/components/errors/UpstreamRejection"}
+            {"$ref":"#/components/errors/NodeError"},
+            {"$ref":"#/components/errors/UpstreamUnavailable"}
         ]
     });
     if method.name == "process" {
@@ -921,6 +1162,43 @@ fn openrpc_method(method: MethodSpec) -> Value {
         });
     }
     document
+}
+
+/// Derive an OpenRPC parameter list from the method's component param schema.
+///
+/// Both spellings of the same contract live side by side: `components.schemas`
+/// describes the parameters, and `methods[].params` points at them. Deriving one
+/// from the other is what keeps them from drifting apart.
+fn openrpc_params(params_schema: &str) -> Vec<Value> {
+    let schemas = component_schemas();
+    let Some(schema) = schemas.get(params_schema) else {
+        return Vec::new();
+    };
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let properties = match schema.get("properties").and_then(Value::as_object) {
+        Some(properties) => properties,
+        None => return Vec::new(),
+    };
+    properties
+        .iter()
+        .map(|(name, definition)| {
+            json!({
+                "name": name,
+                "required": required.iter().any(|required| required == name),
+                "schema": definition
+            })
+        })
+        .collect()
 }
 
 #[derive(Clone)]
@@ -1423,6 +1701,135 @@ fn parse_event_cursor(value: &str) -> Option<(String, u64)> {
     Some((generation.to_owned(), sequence.parse().ok()?))
 }
 
+/// Operator guards for methods whose cost falls outside a normal read.
+///
+/// `block_confirm` starts or re-triggers an election and re-fires confirmation
+/// notifications even for a block that is already confirmed, so it is bounded two
+/// ways. Neither guard inspects block state: suppressing a call because the block
+/// happens to be confirmed would change the method's behaviour, which the upstream
+/// contract does not allow. A refused call returns a transport error and never a
+/// synthesized `started`.
+///
+/// A per-client limit is deliberately absent. The gateway has no client identity it
+/// can trust, so any per-client key today would either collapse every caller behind
+/// one reverse proxy into a single client, or trust a header the caller controls.
+/// Either gives false confidence and can lock out legitimate callers. A global bucket
+/// on its own budget is the honest bound until identity exists.
+#[derive(Debug)]
+pub struct ConfirmGuards {
+    /// Tokens per second for `block_confirm`, deliberately separate from the read
+    /// budget so that using it up cannot starve account reads.
+    rate_per_second: f64,
+    burst: f64,
+    tokens: Mutex<f64>,
+    last_refill: Mutex<Instant>,
+    /// Hashes the node accepted, with the time it was accepted. Bounded in both
+    /// length and age, because an unbounded cooldown cache is itself an exhaustion
+    /// path.
+    cooldown: Mutex<VecDeque<(String, Instant)>>,
+    cooldown_ttl: Duration,
+    cooldown_capacity: usize,
+}
+
+impl ConfirmGuards {
+    pub fn new() -> Self {
+        Self {
+            rate_per_second: 1.0,
+            burst: 4.0,
+            tokens: Mutex::new(4.0),
+            last_refill: Mutex::new(Instant::now()),
+            cooldown: Mutex::new(VecDeque::new()),
+            cooldown_ttl: Duration::from_secs(60),
+            cooldown_capacity: 1024,
+        }
+    }
+
+    /// Reserve one call, or explain how long the caller should wait.
+    pub async fn reserve(&self) -> Result<(), TransportRejection> {
+        let now = Instant::now();
+        let mut last = self.last_refill.lock().await;
+        let mut tokens = self.tokens.lock().await;
+        let elapsed = now.duration_since(*last).as_secs_f64();
+        *tokens = (*tokens + elapsed * self.rate_per_second).min(self.burst);
+        *last = now;
+        if *tokens >= 1.0 {
+            *tokens -= 1.0;
+            return Ok(());
+        }
+        let deficit = 1.0 - *tokens;
+        let retry_after = (deficit / self.rate_per_second).ceil().max(1.0);
+        Err(TransportRejection::rate_limited(
+            "block_confirm rate limit exceeded",
+            retry_after as u64,
+        ))
+    }
+
+    /// Reject a hash still inside its cooldown. The check runs before the call, so a
+    /// refused request never reaches the node.
+    pub async fn check_cooldown(&self, hash: &str) -> Result<(), TransportRejection> {
+        let now = Instant::now();
+        let mut cooldown = self.cooldown.lock().await;
+        Self::evict(
+            &mut cooldown,
+            now,
+            self.cooldown_ttl,
+            self.cooldown_capacity,
+        );
+        if cooldown.iter().any(|(seen, _)| seen == hash) {
+            return Err(TransportRejection::rate_limited(
+                "block_confirm cooldown for this block hash is still active",
+                self.cooldown_ttl.as_secs(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Record a hash the node accepted, starting its cooldown.
+    pub async fn record_accepted(&self, hash: &str) {
+        let now = Instant::now();
+        let mut cooldown = self.cooldown.lock().await;
+        Self::evict(
+            &mut cooldown,
+            now,
+            self.cooldown_ttl,
+            self.cooldown_capacity,
+        );
+        if !cooldown.iter().any(|(seen, _)| seen == hash) {
+            cooldown.push_back((hash.to_owned(), now));
+        }
+    }
+
+    fn evict(
+        entries: &mut VecDeque<(String, Instant)>,
+        now: Instant,
+        ttl: Duration,
+        capacity: usize,
+    ) {
+        while let Some((_, seen)) = entries.front() {
+            if now.duration_since(*seen) >= ttl {
+                entries.pop_front();
+            } else {
+                break;
+            }
+        }
+        while entries.len() > capacity {
+            entries.pop_front();
+        }
+    }
+}
+
+impl Default for ConfirmGuards {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A block hash is 64 hexadecimal characters. Checking the shape before it reaches
+/// the cooldown cache keeps arbitrary caller-supplied strings out of it.
+fn is_block_hash(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
@@ -1436,6 +1843,7 @@ pub struct AppState {
     // RPC and WebSocket providers have independent availability and ordering.
     ws_active: Arc<AtomicUsize>,
     ws_unhealthy_until: Arc<Mutex<Vec<Instant>>>,
+    pub confirm_guards: Arc<ConfirmGuards>,
 }
 
 #[derive(Clone, Default)]
@@ -1554,6 +1962,7 @@ impl AppState {
                 Instant::now();
                 config.node_ws_urls.len()
             ])),
+            confirm_guards: Arc::new(ConfirmGuards::new()),
             config,
             verifying_key,
             upstream_ready: Arc::new(AtomicBool::new(false)),
@@ -1636,11 +2045,19 @@ impl AppState {
         }
         // Translation-layer item 6: an operator guard refuses the call at the
         // transport layer, so it can never appear as a JSON-RPC error body.
-        self.guard(spec.name, &params)?;
+        self.guard(spec.name, &params).await?;
         match self.native.call(spec.name, &params).await {
             // Translation-layer item 1: `result` is the upstream response object,
             // unchanged. The only check is that it still matches the pinned profile.
             Ok(result) => {
+                // Only a hash the node accepted starts a cooldown. Recording a
+                // rejected hash would let a caller lock out a block that never
+                // reached the node in the first place.
+                if spec.name == "block_confirm" {
+                    if let Some(hash) = params.get("hash").and_then(Value::as_str) {
+                        self.confirm_guards.record_accepted(hash).await;
+                    }
+                }
                 if validate_result(spec.name, &result) {
                     Ok(RpcResponse::ok(request.id, result))
                 } else {
@@ -1678,9 +2095,21 @@ impl AppState {
     }
     /// Operator guards that refuse a call before it reaches the node. Returning an
     /// error here means the call never happened, so the response is not JSON-RPC.
-    fn guard(&self, method: &str, _params: &Value) -> Result<(), TransportRejection> {
-        let _ = method;
-        Ok(())
+    async fn guard(&self, method: &str, params: &Value) -> Result<(), TransportRejection> {
+        if method != "block_confirm" {
+            return Ok(());
+        }
+        let hash = params
+            .get("hash")
+            .and_then(Value::as_str)
+            .ok_or_else(|| TransportRejection::forbidden("invalid parameter: hash"))?;
+        if !is_block_hash(hash) {
+            return Err(TransportRejection::forbidden(
+                "invalid parameter: hash must be 64 hexadecimal characters",
+            ));
+        }
+        self.confirm_guards.reserve().await?;
+        self.confirm_guards.check_cooldown(hash).await
     }
     fn authorized(&self, headers: &HeaderMap, scope: Scope) -> bool {
         let Some(key) = self.verifying_key.as_ref() else {
@@ -1716,11 +2145,10 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
         .ok_or_else(|| "params must be an object".to_string())?;
     let required = match method {
         "account_info" | "receivable" | "account_balance" | "account_history" => "account",
-        "accounts_balances" => "accounts",
+        "accounts_balances" | "accounts_frontiers" | "accounts_receivable" => "accounts",
         "blocks_info" => "hashes",
-        "block_info" => "hash",
+        "block_info" | "block_confirm" | "work_generate" => "hash",
         "process" => "block",
-        "work_generate" => "hash",
         _ => return Ok(()),
     };
     let value = object
@@ -1740,19 +2168,79 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
     if !valid {
         return Err(format!("invalid parameter: {required}"));
     }
-    if method == "account_history"
-        && object
-            .get("count")
-            .is_some_and(|count| !count.as_i64().is_some_and(|value| value >= 1))
-    {
-        return Err("invalid parameter: count".into());
+
+    // `count` is documented as an integer. -1 means the whole chain, so the floor is
+    // -1 rather than 1; anything below that cannot select a documented behaviour.
+    if matches!(
+        method,
+        "account_history" | "receivable" | "accounts_receivable"
+    ) {
+        if let Some(count) = object.get("count") {
+            if !count.as_i64().is_some_and(|value| value >= -1) {
+                return Err("invalid parameter: count".into());
+            }
+        }
     }
-    if method == "accounts_balances"
-        && object
-            .get("include_only_confirmed")
-            .is_some_and(|value| !value.is_boolean())
-    {
-        return Err("invalid parameter: include_only_confirmed".into());
+
+    // The boolean options the node documents. `head` and `offset` are checked for
+    // type only, and `head` for the 64-hex-character form the node documents.
+    for name in [
+        "include_only_confirmed",
+        "source",
+        "include_active",
+        "sorting",
+        "include_linked_account",
+        "reverse",
+        "raw",
+        "json_block",
+        "include_not_found",
+        "receive_hash",
+        "include_confirmed",
+        "representative",
+        "weight",
+        "receivable",
+        "force",
+        "async",
+    ] {
+        if object
+            .get(name)
+            .is_some_and(|value| !value.is_boolean() && !value.is_string())
+        {
+            return Err(format!("invalid parameter: {name}"));
+        }
+    }
+    for name in ["head", "threshold"] {
+        if object
+            .get(name)
+            .is_some_and(|value| !value.as_str().is_some_and(|value| !value.is_empty()))
+        {
+            return Err(format!("invalid parameter: {name}"));
+        }
+    }
+    for name in ["offset", "min_version"] {
+        if object
+            .get(name)
+            .is_some_and(|value| !value.as_i64().is_some_and(|value| value >= 0))
+        {
+            return Err(format!("invalid parameter: {name}"));
+        }
+    }
+    if object.get("account_filter").is_some_and(|value| {
+        !value.as_array().is_some_and(|values| {
+            !values.is_empty()
+                && values
+                    .iter()
+                    .all(|value| value.as_str().is_some_and(|value| !value.is_empty()))
+        })
+    }) {
+        return Err("invalid parameter: account_filter".into());
+    }
+    if object.get("subtype").is_some_and(|value| {
+        !value.as_str().is_some_and(|subtype| {
+            matches!(subtype, "send" | "receive" | "open" | "change" | "epoch")
+        })
+    }) {
+        return Err("invalid parameter: subtype".into());
     }
     if method == "work_generate"
         && object
@@ -1778,6 +2266,30 @@ fn has_string(object: &serde_json::Map<String, Value>, name: &str) -> bool {
 /// asserts only the fields the node documents as unconditional, and it accepts the
 /// documented value forms: `confirmed` and `height` arrive as strings, and `contents`
 /// is a JSON string unless `json_block` was requested.
+/// Accept the three shapes the node documents for a receivable block set: an array
+/// of hashes, a hash-to-amount map, and a hash-to-amount-and-source map. The node
+/// picks between them from `threshold` and `source`, so every shape is legitimate.
+fn validate_receivable_value(value: &Value) -> bool {
+    match value {
+        Value::Array(hashes) => hashes.iter().all(Value::is_string),
+        Value::Object(entries) => entries.values().all(|entry| match entry {
+            Value::String(_) => true,
+            Value::Object(fields) => {
+                fields.get("amount").is_some_and(Value::is_string)
+                    && fields.get("source").is_some_and(Value::is_string)
+            }
+            _ => false,
+        }),
+        // Some public nodes encode an empty set as an empty string.
+        Value::String(text) => text.is_empty(),
+        _ => false,
+    }
+}
+
+fn validate_receivable_result(object: &serde_json::Map<String, Value>) -> bool {
+    object.get("blocks").is_some_and(validate_receivable_value)
+}
+
 fn validate_result(method: &str, result: &Value) -> bool {
     let Some(object) = result.as_object() else {
         return false;
@@ -1855,9 +2367,30 @@ fn validate_result(method: &str, result: &Value) -> bool {
                     .all(|item| validate_result("block_info", item))
             })
         }),
-        // Upstream returns the node's three documented `blocks` shapes depending on
-        // `threshold` and `source`, so only the presence of the key is asserted.
-        "receivable" => object.contains_key("blocks"),
+        // Both maps are optional: the node omits `frontiers` when every account
+        // failed and omits `errors` when none did.
+        "accounts_frontiers" => {
+            object.get("frontiers").is_none_or(|frontiers| {
+                frontiers
+                    .as_object()
+                    .is_some_and(|items| items.values().all(|hash| hash.is_string()))
+            }) && object.get("errors").is_none_or(|errors| {
+                errors
+                    .as_object()
+                    .is_some_and(|items| items.values().all(Value::is_string))
+            })
+        }
+        // `started` is the only field, and it is always "1": the call reports that no
+        // error occurred, never that the block confirmed.
+        "block_confirm" => object.get("started").and_then(Value::as_str) == Some("1"),
+        // The node selects one of three `blocks` shapes from the request parameters,
+        // so only the shape's outer form is asserted.
+        "receivable" => validate_receivable_result(object),
+        "accounts_receivable" => object.get("blocks").is_some_and(|blocks| {
+            blocks
+                .as_object()
+                .is_some_and(|items| items.values().all(validate_receivable_value))
+        }),
         "process" => has_string(object, "hash"),
         "work_generate" => ["hash", "work", "difficulty", "multiplier"]
             .iter()
@@ -2645,7 +3178,11 @@ mod tests {
     fn openrpc_contains_only_enabled_methods() {
         let document =
             openrpc_document("nano-node/V28.2", false, true, "http://127.0.0.1:7076/rpc");
-        assert_eq!(document["methods"].as_array().expect("methods").len(), 11);
+        // version, block_count, account_info, receivable, account_balance,
+        // accounts_balances, account_history, block_info, blocks_info,
+        // accounts_frontiers, accounts_receivable, block_confirm, process and
+        // rpc.discover. work_generate is filtered out while work is disabled.
+        assert_eq!(document["methods"].as_array().expect("methods").len(), 14);
     }
 
     #[test]
@@ -3037,16 +3574,22 @@ node_ws_urls:
     #[test]
     fn accounts_balances_requires_nonempty_accounts_and_a_boolean_confirmation_flag() {
         assert!(validate_params("accounts_balances", &json!({"accounts": []})).is_err());
+        // The node documents these flags in both native boolean and string form.
         assert!(validate_params(
             "accounts_balances",
             &json!({"accounts": ["nano_test"], "include_only_confirmed": "true"})
         )
-        .is_err());
+        .is_ok());
         assert!(validate_params(
             "accounts_balances",
             &json!({"accounts": ["nano_test"], "include_only_confirmed": true})
         )
         .is_ok());
+        assert!(validate_params(
+            "accounts_balances",
+            &json!({"accounts": ["nano_test"], "include_only_confirmed": 7})
+        )
+        .is_err());
     }
 
     #[test]
@@ -3172,12 +3715,68 @@ node_ws_urls:
 
     #[test]
     fn collection_parameters_follow_profile_limits() {
+        // -1 selects the whole chain, so the floor is -1 rather than 1.
+        for count in [-1, 0, 1, 10] {
+            assert!(
+                validate_params(
+                    "account_history",
+                    &json!({"account": "nano_test", "count": count})
+                )
+                .is_ok(),
+                "count {count}"
+            );
+        }
         assert!(validate_params(
             "account_history",
-            &json!({"account": "nano_test", "count": 0})
+            &json!({"account": "nano_test", "count": -2})
+        )
+        .is_err());
+        assert!(validate_params(
+            "account_history",
+            &json!({"account": "nano_test", "count": "all"})
         )
         .is_err());
         assert!(validate_params("blocks_info", &json!({"hashes": []})).is_err());
+        assert!(validate_params("accounts_frontiers", &json!({"accounts": []})).is_err());
+        assert!(validate_params("accounts_receivable", &json!({"accounts": []})).is_err());
+        assert!(validate_params("block_confirm", &json!({})).is_err());
+    }
+
+    #[test]
+    fn account_history_accepts_the_pagination_and_raw_parameters() {
+        for method in ["account_history", "receivable", "accounts_receivable"] {
+            let base = if method == "accounts_receivable" {
+                json!({"accounts": ["nano_test"]})
+            } else {
+                json!({"account": "nano_test"})
+            };
+            let mut params = base.clone();
+            params["count"] = json!(5);
+            params["sorting"] = json!(true);
+            assert!(validate_params(method, &params).is_ok(), "{method}");
+        }
+        let history = json!({
+            "account": "nano_test",
+            "head": "A".repeat(64),
+            "count": 2,
+            "offset": 0,
+            "reverse": true,
+            "raw": true,
+            "include_linked_account": true,
+            "account_filter": ["nano_other"]
+        });
+        assert!(validate_params("account_history", &history).is_ok());
+        // An empty filter and a negative offset cannot select a documented behaviour.
+        assert!(validate_params(
+            "account_history",
+            &json!({"account": "nano_test", "account_filter": []})
+        )
+        .is_err());
+        assert!(validate_params(
+            "account_history",
+            &json!({"account": "nano_test", "offset": -1})
+        )
+        .is_err());
     }
     #[test]
     fn playground_url_uses_gateway_root_schema_by_default() {
