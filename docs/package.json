@@ -6,10 +6,11 @@
     "validate:asyncapi": "node scripts/validate-asyncapi.mjs",
     "validate:openrpc": "node scripts/validate-openrpc.mjs",
     "validate": "npm run validate:openrpc && npm run validate:asyncapi",
+    "parity": "node scripts/check-parity.mjs",
     "models": "node scripts/generate-model-smoke.mjs",
     "site": "node scripts/generate-site.mjs",
     "generate": "npm run contracts && npm run validate && npm run site",
-    "check": "node scripts/check-generated.mjs",
+    "check": "node scripts/check-parity.mjs && node scripts/check-generated.mjs",
     "preview": "node scripts/preview.mjs"
   },
   "devDependencies": {

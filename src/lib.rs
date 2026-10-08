@@ -913,10 +913,6 @@ fn component_schemas() -> serde_json::Map<String, Value> {
     };
 
     add(
-        "AccountParams",
-        json!({"type":"object","required":["account"],"properties":{"account":{"type":"string","minLength":1}}}),
-    );
-    add(
         "AccountsParams",
         json!({"type":"object","required":["accounts"],"properties":{
             "accounts":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
@@ -1192,6 +1188,9 @@ fn openrpc_method(method: MethodSpec) -> Value {
         "name": method.name,
         "summary": method.description,
         "x-nano-schema-provenance": method.schema_provenance,
+        // The parameter list below is derived from this schema, so a reader can check
+        // the two against each other instead of taking the inline copy on trust.
+        "x-nano-params-schema": {"$ref": format!("#/components/schemas/{}", method.params)},
         "paramStructure": "by-name",
         "params": openrpc_params(method.params),
         "result": {

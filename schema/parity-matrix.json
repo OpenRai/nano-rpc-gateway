@@ -1,0 +1,491 @@
+{
+  "_meta": {
+    "profile": "nano-node/V28.2",
+    "purpose": "Every method, parameter, response field, event and topic maps to exactly one status. There is no documented-deviation category: anything not exposed exactly as upstream either is omitted because upstream deprecated or removed it, is one of the six sanctioned translation-layer items, or is deliberately not implemented.",
+    "baseline": {
+      "rpc": "https://docs.nano.org/commands/rpc-protocol/",
+      "websockets": "https://docs.nano.org/integration-guides/websockets/",
+      "confirmation_tracking": "https://docs.nano.org/integration-guides/block-confirmation-tracking/",
+      "release_v28_0": "https://docs.nano.org/releases/release-v28-0/"
+    },
+    "statuses": {
+      "present": "Exposed exactly as the upstream documentation describes it.",
+      "omitted-deprecated": "Upstream deprecated or removed it, so the gateway does not expose it.",
+      "translation-layer": "One of the six sanctioned translation-layer items. These change transport or framing, never meaning.",
+      "not-implemented": "Documented upstream and not deprecated, but deliberately not exposed. Each such row must say why. A known gap, not an oversight."
+    },
+    "translation_layer_items": {
+      "1": "JSON-RPC 2.0 envelope: method is the upstream action, params is the upstream request object without action, result is the upstream response object unchanged.",
+      "2": "A node error whose only key is error becomes a JSON-RPC error whose message is that string verbatim, under one fixed code. Failures that never reach the node use standard JSON-RPC codes.",
+      "3": "Events travel as SSE, one stream per subscription: the event name is the upstream topic and the payload carries every upstream field unchanged, including time. Subscribe options map to connect-time parameters.",
+      "4": "If the upstream WebSocket drops the client stream closes, as a node closing a WebSocket would. No buffering, replay or gap announcement.",
+      "5": "rpc.discover is allowed as the standard OpenRPC discovery method. x-* extensions are allowed as annotations that restate upstream guidance and change no request or response.",
+      "6": "Operators may rate-limit any method. A rejected call is a transport error and changes neither the schema nor the result of any accepted call."
+    }
+  },
+  "methods": {
+    "version": {
+      "status": "present",
+      "anchor": "rpc-protocol#version",
+      "params": {},
+      "result": "VersionResult",
+      "note": "Exposed as documented. Two observed-but-undocumented provider fields (requestsLimit, requestsRemaining, requestLimitReset) pass through under item 1 and are not declared."
+    },
+    "block_count": {
+      "status": "present",
+      "anchor": "rpc-protocol#block_count",
+      "params": {},
+      "result": "BlockCountResult",
+      "note": "Exposed as documented. include_cemented is not declared; it defaults to true upstream and the gateway does not alter it."
+    },
+    "account_info": {
+      "status": "present",
+      "anchor": "rpc-protocol#account_info",
+      "params": {
+        "account": {
+          "required": true,
+          "status": "present"
+        },
+        "include_confirmed": {
+          "required": false,
+          "status": "present",
+          "note": "Without it the response carries no confirmed_* fields."
+        },
+        "receivable": {
+          "required": false,
+          "status": "present"
+        },
+        "representative": {
+          "required": false,
+          "status": "present"
+        },
+        "weight": {
+          "required": false,
+          "status": "present"
+        }
+      },
+      "result": "AccountInfoResult",
+      "note": "All flags default false, as upstream, and are forwarded untouched so the node decides. No confirmed_* field appears unless include_confirmed was requested."
+    },
+    "receivable": {
+      "status": "present",
+      "anchor": "rpc-protocol#receivable",
+      "params": {
+        "account": {
+          "required": true,
+          "status": "present"
+        },
+        "count": {
+          "required": false,
+          "status": "present"
+        },
+        "include_active": {
+          "required": false,
+          "status": "present"
+        },
+        "include_only_confirmed": {
+          "required": false,
+          "status": "present"
+        },
+        "min_version": {
+          "required": false,
+          "status": "present",
+          "note": "Observed to add a third field to the source shape under some combinations, unreproducibly. Documented only for this action, not for accounts_receivable."
+        },
+        "sorting": {
+          "required": false,
+          "status": "present",
+          "note": "Observed to select the hash-to-amount shape even without threshold, which the docs do not state."
+        },
+        "source": {
+          "required": false,
+          "status": "present",
+          "note": "Selects the hash-to-object result shape, and wins over threshold and sorting."
+        },
+        "threshold": {
+          "required": false,
+          "status": "present",
+          "note": "Selects the hash-to-amount result shape."
+        }
+      },
+      "result": "ReceivableResult",
+      "note": "Shape selection observed on V29.0-DEV and not stated in the docs: source wins over threshold and sorting, and sorting alone selects the hash-to-amount shape. See fixtures/native/v29.0-dev/observations.md."
+    },
+    "account_balance": {
+      "status": "present",
+      "anchor": "rpc-protocol#account_balance",
+      "params": {
+        "account": {
+          "required": true,
+          "status": "present"
+        },
+        "include_only_confirmed": {
+          "required": false,
+          "status": "present"
+        }
+      },
+      "result": "AccountBalanceResult"
+    },
+    "accounts_balances": {
+      "status": "present",
+      "anchor": "rpc-protocol#accounts_balances",
+      "params": {
+        "accounts": {
+          "required": true,
+          "status": "present"
+        },
+        "include_only_confirmed": {
+          "required": false,
+          "status": "present"
+        }
+      },
+      "result": "AccountsBalancesResult",
+      "note": "balances and errors are both optional upstream; the gateway asserts neither. An account absent from the ledger reports zero balance and zero receivable rather than an error, per the docs."
+    },
+    "account_history": {
+      "status": "present",
+      "anchor": "rpc-protocol#account_history",
+      "params": {
+        "account": {
+          "required": true,
+          "status": "present"
+        },
+        "account_filter": {
+          "required": false,
+          "status": "present"
+        },
+        "count": {
+          "required": false,
+          "status": "present",
+          "note": "-1 returns the whole chain."
+        },
+        "head": {
+          "required": false,
+          "status": "present",
+          "note": "Inclusive: the head block is entry 0. Confirmed by observation on V29.0-DEV."
+        },
+        "include_linked_account": {
+          "required": false,
+          "status": "present"
+        },
+        "offset": {
+          "required": false,
+          "status": "present"
+        },
+        "raw": {
+          "required": false,
+          "status": "present",
+          "note": "Required for Scenario 3, because the summary form skips change and epoch blocks."
+        },
+        "reverse": {
+          "required": false,
+          "status": "present",
+          "note": "Renames the response's `previous` to `next`."
+        }
+      },
+      "result": "AccountHistoryResult",
+      "note": "count accepts -1 for the whole chain. head is inclusive, confirmed by observation on V29.0-DEV. previous is returned when count truncates, and reverse renames it to next."
+    },
+    "block_info": {
+      "status": "present",
+      "anchor": "rpc-protocol#block_info",
+      "params": {
+        "hash": {
+          "required": true,
+          "status": "present"
+        },
+        "include_linked_account": {
+          "required": false,
+          "status": "present"
+        },
+        "json_block": {
+          "required": false,
+          "status": "present",
+          "note": "Without it the response's contents is a JSON string. Confirmed by observation."
+        }
+      },
+      "result": "BlockInfoResult",
+      "note": "subtype is state blocks only and is optional. contents is a JSON string unless json_block was requested; the gateway no longer parses it into an object. include_linked_account was added in V28.0 and is not deprecated."
+    },
+    "blocks_info": {
+      "status": "present",
+      "anchor": "rpc-protocol#blocks_info",
+      "params": {
+        "hashes": {
+          "required": true,
+          "status": "present"
+        },
+        "include_linked_account": {
+          "required": false,
+          "status": "present"
+        },
+        "include_not_found": {
+          "required": false,
+          "status": "present",
+          "note": "Adds blocks_not_found to the response."
+        },
+        "json_block": {
+          "required": false,
+          "status": "present",
+          "note": "Without it each entry's contents is a JSON string."
+        },
+        "receive_hash": {
+          "required": false,
+          "status": "present"
+        },
+        "source": {
+          "required": false,
+          "status": "present",
+          "note": "Adds source_account to each entry."
+        }
+      },
+      "result": "BlocksInfoResult",
+      "note": "blocks_not_found appears only when include_not_found was requested and is passed through. topo_height was observed on V29.0-DEV and is undocumented; it passes through under item 1 and is not declared."
+    },
+    "accounts_frontiers": {
+      "status": "present",
+      "anchor": "rpc-protocol#accounts_frontiers",
+      "params": {
+        "accounts": {
+          "required": true,
+          "status": "present"
+        }
+      },
+      "result": "AccountsFrontiersResult",
+      "note": "frontiers and errors are both optional upstream; the gateway asserts neither. Head blocks can be unconfirmed, so confirm one with blocks_info before treating it as final."
+    },
+    "accounts_receivable": {
+      "status": "present",
+      "anchor": "rpc-protocol#accounts_receivable",
+      "params": {
+        "accounts": {
+          "required": true,
+          "status": "present"
+        },
+        "count": {
+          "required": false,
+          "status": "present"
+        },
+        "include_active": {
+          "required": false,
+          "status": "present"
+        },
+        "include_only_confirmed": {
+          "required": false,
+          "status": "present"
+        },
+        "sorting": {
+          "required": false,
+          "status": "present"
+        },
+        "source": {
+          "required": false,
+          "status": "present"
+        },
+        "threshold": {
+          "required": false,
+          "status": "present"
+        }
+      },
+      "result": "AccountsReceivableResult",
+      "note": "Same shape-selection rule as receivable, verified for the single-account form. A public provider may refuse this action with its own error, which item 2 surfaces verbatim."
+    },
+    "block_confirm": {
+      "status": "present",
+      "anchor": "rpc-protocol#block_confirm",
+      "params": {
+        "hash": {
+          "required": true,
+          "status": "present"
+        }
+      },
+      "result": "BlockConfirmResult",
+      "note": "started is always \"1\" and never says the block confirmed. Guarded by a token bucket on a budget separate from reads plus a bounded per-hash cooldown, both of which are item 6. Neither guard inspects block state, because that would change the method's behaviour."
+    },
+    "process": {
+      "status": "present",
+      "anchor": "rpc-protocol#process",
+      "params": {
+        "async": {
+          "required": false,
+          "status": "present",
+          "note": "Changes the result to started rather than hash. The outcome arrives on the new_unconfirmed_block topic, which is not implemented."
+        },
+        "block": {
+          "required": true,
+          "status": "present"
+        },
+        "force": {
+          "required": false,
+          "status": "present"
+        },
+        "json_block": {
+          "required": false,
+          "status": "present"
+        },
+        "subtype": {
+          "required": false,
+          "status": "present",
+          "note": "Strongly recommended upstream and required in a future node version."
+        }
+      },
+      "result": "ProcessResult",
+      "note": "subtype is strongly recommended upstream and required in a future node version. With async the result is started rather than hash, which the schema models."
+    },
+    "rpc.discover": {
+      "status": "translation-layer",
+      "item": 5,
+      "anchor": "openrpc-spec#rpc.discover",
+      "note": "Standard OpenRPC discovery. It is not a Nano node action, so it has no upstream counterpart in the RPC protocol page."
+    }
+  },
+  "stream_events": {
+    "nano.confirmation": {
+      "status": "translation-layer",
+      "item": 3,
+      "anchor": "websockets#confirmations",
+      "topic": "confirmation",
+      "note": "Carries every field of the node's confirmation message unchanged, including time, with the topic in the SSE event name instead of a payload field. Nothing is added: the gateway used to add profile, destination and a top-level subtype, all derivable from the block the node already sends."
+    }
+  },
+  "stream_topics": {
+    "confirmation": {
+      "status": "present",
+      "event": "nano.confirmation",
+      "schema": "ConfirmationParams",
+      "anchor": "websockets#confirmations",
+      "subscribe_options": [
+        "confirmation_type",
+        "accounts",
+        "all_local_accounts",
+        "include_block",
+        "include_election_info",
+        "include_sideband_info"
+      ],
+      "update_options": [
+        "accounts_add",
+        "accounts_del"
+      ],
+      "options_note": "Subscribe options are honoured. all_local_accounts is accepted and never passed upstream: it asks for accounts in the node's own wallet, which is a custodial dev-ledger feature outside this gateway's scope, and the schema says so. update_options is the one documented capability with no equivalent: SSE carries no client-to-server message, so changing the filter means opening a new stream. P0 item 7 of the change request asked for an equivalent; the decision was to record the gap rather than invent a resource vocabulary the node does not have. See the channel description in asyncapi.json."
+    },
+    "vote": {
+      "status": "not-implemented",
+      "anchor": "websockets#votes",
+      "required_by_scenarios": false,
+      "note": "Not implemented. Not required by any of the three canonical account-tracking scenarios, and none of the three needs it. Recorded here so a later review does not have to rediscover that it was considered. Upstream: reports a representative's vote, with an optional representatives filter. High volume by nature. Exposing it would also mean the node can be made to re-broadcast votes for a filtered set, so the filter semantics and the bounded-subscriber policy would both need deciding first."
+    },
+    "started_election": {
+      "status": "not-implemented",
+      "anchor": "websockets#started-elections",
+      "required_by_scenarios": false,
+      "note": "Not implemented. Not required by any of the three canonical account-tracking scenarios, and none of the three needs it. Recorded here so a later review does not have to rediscover that it was considered. Upstream: announces a new election with hash, account, validated, voters and confirmation height. Vote and election progress, which the gateway's published guidance already tells consumers it does not report."
+    },
+    "stopped_election": {
+      "status": "not-implemented",
+      "anchor": "websockets#stopped-elections",
+      "required_by_scenarios": false,
+      "note": "Not implemented. Not required by any of the three canonical account-tracking scenarios, and none of the three needs it. Recorded here so a later review does not have to rediscover that it was considered. Upstream: announces that an election ended, with hash and status. Same reasoning as started_election."
+    },
+    "work": {
+      "status": "not-implemented",
+      "anchor": "websockets#proof-of-work",
+      "required_by_scenarios": false,
+      "note": "Not implemented. Not required by any of the three canonical account-tracking scenarios, and none of the three needs it. Recorded here so a later review does not have to rediscover that it was considered. Upstream: announces work generation. The gateway does expose the work_generate RPC behind a disabled-by-default flag, but the topic is separate and no scenario reads it."
+    },
+    "telemetry": {
+      "status": "not-implemented",
+      "anchor": "websockets#node-telemetry",
+      "required_by_scenarios": false,
+      "note": "Not implemented. Not required by any of the three canonical account-tracking scenarios, and none of the three needs it. Recorded here so a later review does not have to rediscover that it was considered. Upstream: periodic node telemetry including the version map. A public provider was observed refusing this action with its own error, so provider support varies; see fixtures/native/v29.0-dev/observations.md."
+    },
+    "new_unconfirmed_block": {
+      "status": "not-implemented",
+      "anchor": "websockets#new-unconfirmed-blocks",
+      "required_by_scenarios": false,
+      "note": "Not implemented. Not required by any of the three canonical account-tracking scenarios, and none of the three needs it. Recorded here so a later review does not have to rediscover that it was considered. Upstream: announces a block that was processed but is not yet cemented. This is the documented way to observe the outcome of process with async, which the gateway's process schema already mentions. Worth revisiting alongside async support rather than in isolation."
+    },
+    "bootstrap": {
+      "status": "not-implemented",
+      "anchor": "websockets#bootstrap",
+      "required_by_scenarios": false,
+      "note": "Not implemented. Not required by any of the three canonical account-tracking scenarios, and none of the three needs it. Recorded here so a later review does not have to rediscover that it was considered. Upstream: node bootstrap progress. Node-operator observability rather than integration surface."
+    }
+  },
+  "omitted_actions": {
+    "pending": {
+      "status": "omitted-deprecated",
+      "note": "Deprecated in V24.0 in favour of receivable. Confirmed still live and returning deprecated:true on V29.0-DEV.",
+      "anchor": "rpc-protocol#pending"
+    },
+    "accounts_pending": {
+      "status": "omitted-deprecated",
+      "note": "Deprecated in V24.0 in favour of accounts_receivable.",
+      "anchor": "rpc-protocol#accounts_pending"
+    },
+    "pending_exists": {
+      "status": "omitted-deprecated",
+      "note": "Deprecated in V24.0 in favour of receivable_exists.",
+      "anchor": "rpc-protocol#pending_exists"
+    },
+    "history": {
+      "status": "omitted-deprecated",
+      "note": "Superseded by account_history.",
+      "anchor": "rpc-protocol#history"
+    },
+    "active_difficulty": {
+      "status": "omitted-deprecated",
+      "note": "Still accepted and returning deprecated:true on V29.0-DEV, but deprecated upstream. Omitted from both the RPC and the WebSocket surface.",
+      "anchor": "rpc-protocol#active_difficulty"
+    },
+    "wss://": {
+      "status": "omitted-deprecated",
+      "note": "Secure WebSockets are deprecated upstream from V27; terminate TLS at a reverse proxy instead.",
+      "anchor": "websockets#secure-websockets"
+    },
+    "watch_work": {
+      "status": "omitted-deprecated",
+      "note": "Removed from process in V22.0.",
+      "anchor": "rpc-protocol#process"
+    },
+    "krai_* / mrai_* / rai_*": {
+      "status": "omitted-deprecated",
+      "note": "Unit-conversion actions removed in V28.0, along with the xrb and kxrb ratios.",
+      "anchor": "release-v28-0"
+    },
+    "pending option and field": {
+      "status": "omitted-deprecated",
+      "note": "Not requested on account_info or blocks_info. Note the node still returns pending on account_balance unprompted, which passes through under item 1 and is not declared.",
+      "anchor": "release-v24-0#pendingreceivable-term-rpc-updates"
+    }
+  },
+  "omitted_topics": {
+    "active_difficulty": {
+      "status": "omitted-deprecated",
+      "note": "Deprecated upstream. It is a separate topic from the RPC action of the same name.",
+      "anchor": "websockets#removed-topics"
+    }
+  },
+  "open_gaps": [
+    {
+      "item": "Runtime subscription filter update",
+      "status": "not-implemented",
+      "detail": "The node changes a live subscription with an update message carrying accounts_add and accounts_del (V21+). SSE is unidirectional, so there is no equivalent. Changing the tracked set means opening a new stream, which opens a delivery gap; the upstream guide already requires reconciling after one."
+    },
+    {
+      "item": "all_local_accounts not forwarded",
+      "status": "translation-layer",
+      "item_number": 3,
+      "detail": "Accepted and ignored. It selects accounts in the node's own wallet, a custodial dev-ledger feature the gateway does not track and does not expose. The one subscribe option not passed upstream."
+    },
+    {
+      "item": "Provider action policy",
+      "status": "observed",
+      "detail": "A public provider was observed refusing accounts_receivable, confirmation_history, representatives, accounts_representatives and telemetry with its own error. This is provider policy, not enable_control. item 2 surfaces the refusal verbatim, so a caller cannot distinguish it from any other node error. Scenario 3 is affected on such a node."
+    },
+    {
+      "item": "Undocumented node fields pass through",
+      "status": "observed",
+      "detail": "topo_height on block_info, and requestsLimit/requestsRemaining/requestLimitReset on every response of the observed provider, are not in the documentation. item 1 forwards them; the gateway does not declare them."
+    }
+  ]
+}

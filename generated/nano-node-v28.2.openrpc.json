@@ -220,18 +220,6 @@
         ],
         "type": "object"
       },
-      "AccountParams": {
-        "properties": {
-          "account": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "account"
-        ],
-        "type": "object"
-      },
       "AccountsBalancesResult": {
         "description": "Both maps are optional; the node omits one when no entry applies to it. An account absent from the ledger reports a zero balance and zero receivable rather than an error.",
         "properties": {
@@ -870,6 +858,9 @@
         }
       },
       "summary": "Read the upstream node version.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/EmptyParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -897,6 +888,9 @@
         }
       },
       "summary": "Read upstream ledger block counts.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/EmptyParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -969,6 +963,9 @@
         }
       },
       "summary": "Read current and confirmed frontier state for one account.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/AccountInfoParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1065,6 +1062,9 @@
         }
       },
       "summary": "Read receivable blocks for an account.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/ReceivableParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1110,6 +1110,9 @@
         }
       },
       "summary": "Read balance and receivable state for one account.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/AccountBalanceParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1159,6 +1162,9 @@
         }
       },
       "summary": "Read balances and receivables for several accounts.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/AccountsParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1260,6 +1266,9 @@
         }
       },
       "summary": "Read account history.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/AccountHistoryParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1314,6 +1323,9 @@
         }
       },
       "summary": "Read block metadata and whether the block is cemented.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/BlockParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1399,6 +1411,9 @@
         }
       },
       "summary": "Read metadata for several blocks.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/BlocksParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1439,6 +1454,9 @@
         }
       },
       "summary": "Read the head block hash for each account.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/AccountsFrontiersParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1531,6 +1549,9 @@
         }
       },
       "summary": "Read receivable blocks for several accounts.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/AccountsReceivableParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1568,6 +1589,9 @@
         }
       },
       "summary": "Request confirmation for a block from online representatives.",
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/BlockConfirmParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1653,6 +1677,9 @@
           "authenticated"
         ]
       },
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/ProcessParams"
+      },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
     },
     {
@@ -1681,7 +1708,7 @@
       }
     }
   ],
-  "x-nano-artifact-sha256": "sha256:35642bf2ec88e175b1ac4d5dbfc09638bbf1a6b557151ca74b694e96b259f4ea",
+  "x-nano-artifact-sha256": "sha256:c6bb029649962947a3e656bae051eece68d49b7b226e6487d0bbb09e80619ed0",
   "x-nano-common-authentication": {
     "required": true
   },
