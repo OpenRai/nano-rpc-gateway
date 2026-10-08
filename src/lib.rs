@@ -14,6 +14,7 @@ use std::{
 use async_stream::stream;
 use axum::{
     body::Bytes,
+    // Aliased because `std::path::Path` is also in scope.
     extract::State,
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     response::{
@@ -21,7 +22,8 @@ use axum::{
         IntoResponse, Response,
     },
     routing::{get, post},
-    Json, Router,
+    Json,
+    Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -75,9 +77,17 @@ public_url: null
 /// proxy. 110 accounts is 7259 bytes, which leaves room for the path and the
 /// other parameters inside 8 KiB.
 const MAX_ACCOUNT_FILTER_BYTES: usize = 7680;
+/// The POST variant carries the account set in a request body, so the request line is
+/// not the constraint. This is bounded by the 1 MiB request body limit instead: at 66
+/// bytes per account that allows roughly fifteen thousand, and this cap stops a
+/// caller from asking for more than it could usefully be sent.
+const MAX_BODY_ACCOUNT_ITEMS: usize = 15_000;
 /// Per-subscriber buffer. A subscriber that falls this far behind is closed, because
 /// the node offers no replay to catch up with.
 const SSE_QUEUE_CAPACITY: usize = 256;
+/// How often an idle stream emits a keepalive comment. Frequent enough that an
+/// intermediary does not treat the connection as dead between events.
+const STREAM_KEEPALIVE: Duration = Duration::from_secs(15);
 const MAX_ACCOUNT_FILTER_ITEMS: usize = 110;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -391,6 +401,12 @@ impl TransportRejection {
     }
 }
 
+impl IntoResponse for TransportRejection {
+    fn into_response(self) -> Response {
+        self.into_response()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcRequest {
     pub jsonrpc: String,
@@ -694,7 +710,8 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
             "confirmations": {
                 "address": "/events/confirmations",
                 "title": "Confirmation event stream",
-                "description": "Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose link_as_account is a tracked account. For a send, params.hash equals the process result hash. Deduplicate by hash. When the upstream WebSocket drops the stream closes, as a node closing a WebSocket would; there is no replay and no gap announcement, so reconcile with accounts_frontiers and account_history before applying later events.",
+                "description": "Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose link_as_account is a tracked account. For a send, params.hash equals the process result hash. Deduplicate by hash. When the upstream WebSocket drops the stream closes, as a node closing a WebSocket would; there is no replay and no gap announcement, so reconcile with accounts_frontiers and account_history before applying later events. The filter cannot be changed on a live stream: the node changes one with an update message carrying accounts_add and accounts_del, and SSE carries no client-to-server message. A client that needs to change its tracked set opens a new stream and reconciles afterwards. A client with more accounts than fit in a request line splits them across several streams, or POSTs the same options as a JSON body.",
+
                 "servers": [{"$ref": "#/servers/gateway"}],
                 "messages": {
                     "nanoConfirmation": {"$ref": "#/components/messages/nano.confirmation"}
@@ -706,17 +723,29 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
             "receiveConfirmations": {
                 "action": "receive",
                 "summary": "Receive cemented Nano account confirmations.",
+                "description": "GET carries the account filter in the request line, which is what EventSource speaks and needs no custom client code. It is bounded by what an intermediary accepts as a request line, commonly about 8 KiB, so roughly a hundred accounts.",
                 "channel": {"$ref": "#/channels/confirmations"},
                 "bindings": {"http": {
                     "method": "GET",
                     "query": {"type": "object", "properties": {
-                        "accounts": {"type": "string", "description": "Comma-separated account filter. A match is a confirmed block owned by a tracked account (send or receive), or a state send whose link_as_account is a tracked account. nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied."}
-                    },
+                        "accounts": {"type": "string", "description": "Comma-separated account filter."}
+                    }},
                     "x-nano-filter-ceiling": {
                         "maxAccounts": MAX_ACCOUNT_FILTER_ITEMS,
                         "maxBytes": MAX_ACCOUNT_FILTER_BYTES,
-                        "why": "The node documents no cap. These caps are sized to what an HTTP request line can carry, because nginx and Apache commonly limit one to about 8 KiB. A Nano address is 65 characters, so 110 accounts is 7259 bytes. To track a larger set, POST the account set in a request body instead."
-                    }},
+                        "why": "The node documents no cap. This bound is what an HTTP request line can carry, because nginx and Apache commonly limit one to about 8 KiB. A Nano address is 65 characters, so 110 accounts is 7259 bytes. Use POST, or split the set across several streams, to go beyond it."
+                    },
+                    "bindingVersion": "0.3.0"
+                }}
+            },
+            "receiveConfirmationsWithBody": {
+                "action": "receive",
+                "summary": "The same stream, with the subscribe options in a JSON body.",
+                "description": "EventSource only issues GET, so a client whose filter outgrows the request line uses fetch and reads the response as a stream. The response is byte-for-byte the same SSE the GET form returns. Requires custom client code.",
+                "channel": {"$ref": "#/channels/confirmations"},
+                "bindings": {"http": {
+                    "method": "POST",
+                    "query": {"$ref": "#/components/schemas/ConfirmationSubscribeOptions"},
                     "bindingVersion": "0.3.0"
                 }}
             }
@@ -725,8 +754,7 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
             "messages": messages,
             "schemas": {
                 "ConfirmationParams": confirmation_params_schema(),
-                "ConfirmationSubscribeOptions": confirmation_subscribe_options(),
-                "ConfirmationUpdateOptions": confirmation_update_options()
+                "ConfirmationSubscribeOptions": confirmation_subscribe_options()
             }
         },
         "x-nano-profile": profile,
@@ -835,29 +863,20 @@ fn confirmation_params_schema() -> Value {
 /// The subscribe options the node documents for the confirmation topic.
 ///
 /// They map to connect-time parameters on the subscription, so a caller chooses
-/// them when it subscribes rather than per event.
+/// them when it subscribes rather than per event. The gateway's own upstream
+/// subscription is opened unfiltered and each subscriber's options are applied to
+/// the events it receives, which reproduces the node's selection without one
+/// upstream socket per distinct option set.
 fn confirmation_subscribe_options() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "confirmation_type": {"type": "string", "enum": ["all", "active", "inactive", "active_quorum", "active_confirmation_height"], "default": "all", "description": "Which confirmations to receive. The upstream guide recommends leaving this unset so a notification is less likely to be missed."},
-            "accounts": {"type": "array", "items": {"type": "string"}, "description": "Only receive confirmations that mention these accounts. Legacy blocks are never broadcast when a filter is given."},
-            "all_local_accounts": {"type": "boolean", "description": "Receive confirmations that mention any account in a node wallet."},
-            "include_block": {"type": "boolean", "default": true, "description": "Include the block content. Incompatible with account filtering."},
-            "include_election_info": {"type": "boolean", "default": false, "description": "Add election_info to each confirmation."},
-            "include_sideband_info": {"type": "boolean", "default": false, "description": "Add height and local_timestamp to the block."}
-        },
-        "additionalProperties": false
-    })
-}
-
-/// The runtime filter-update options the node documents (V21+).
-fn confirmation_update_options() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "accounts_add": {"type": "array", "items": {"type": "string"}, "description": "Start receiving confirmations that mention these accounts."},
-            "accounts_del": {"type": "array", "items": {"type": "string"}, "description": "Stop receiving confirmations that mention these accounts."}
+            "confirmation_type": {"type": "string", "enum": ["all", "active", "inactive", "active_quorum", "active_confirmation_height"], "default": "all", "description": "Which confirmations to receive, filtered on the event's own confirmation_type. The upstream guide recommends leaving this unset so a notification is less likely to be missed."},
+            "accounts": {"type": "array", "items": {"type": "string"}, "description": "Only receive confirmations that mention these accounts. A state send matches on its owning account or its block's link_as_account. Legacy blocks are never delivered once a filter is given."},
+            "all_local_accounts": {"type": "boolean", "default": false, "description": "Accepted and ignored. It asks for accounts held in the node's own wallet, which is a custodial dev-ledger feature the gateway does not track and does not expose. A non-custodial integrator lists its own accounts in `accounts` instead, which is the equivalent behaviour. This is the one option the gateway does not pass upstream."},
+            "include_block": {"type": "boolean", "default": true, "description": "Include the block content. Omit the block from the payload when false. Incompatible with an accounts filter, as it is upstream."},
+            "include_election_info": {"type": "boolean", "default": false, "description": "Add election_info to each confirmation. The gateway always requests it upstream so it is available when asked for."},
+            "include_sideband_info": {"type": "boolean", "default": false, "description": "Add height and local_timestamp to the block. The gateway always requests it upstream so it is available when asked for."}
         },
         "additionalProperties": false
     })
@@ -2381,7 +2400,9 @@ pub fn app(state: AppState) -> Router {
         .route("/rpc", post(rpc_handler))
         .route("/openrpc.json", get(openrpc_handler))
         .route("/asyncapi.json", get(asyncapi_handler))
-        .route("/events/confirmations", get(sse_handler))
+        // Both verbs reach the same stream: EventSource can only GET, and a fetch
+        // client that outgrew the request line can POST the same options.
+        .route("/events/confirmations", get(sse_handler).post(sse_handler))
         .route("/health", get(|| async { Json(json!({"status":"ok"})) }))
         .route("/readyz", get(ready_handler))
         .route("/metrics", get(metrics_handler))
@@ -2530,32 +2551,228 @@ async fn asyncapi_handler(State(state): State<AppState>) -> Response {
     .into_response()
 }
 
+/// How a subscriber selected which confirmations it wants.
+///
+/// These are the node's own connect-time subscribe options. The upstream guide asks
+/// clients to leave `confirmation_type` unset so a notification is less likely to be
+/// missed, and to omit `confirmation_type` entirely for that reason.
+///
+/// Runtime filter updates are not available. The node changes a live subscription
+/// with an `update` message carrying `accounts_add` and `accounts_del`; SSE has no
+/// channel for the client to send one. Changing the tracked set therefore means
+/// opening a new stream, which the upstream guide already requires a client to
+/// reconcile afterwards. A client with more accounts than fit in a request line can
+/// split them across several streams.
+#[derive(Debug, Clone)]
+pub struct StreamOptions {
+    pub confirmation_type: ConfirmationType,
+    pub accounts: Option<Vec<String>>,
+    pub include_block: bool,
+    pub include_election_info: bool,
+    pub include_sideband_info: bool,
+}
+
+/// The node classifies each confirmation and can filter on that classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConfirmationType {
+    #[default]
+    All,
+    Active,
+    Inactive,
+    ActiveQuorum,
+    ActiveConfirmationHeight,
+}
+
+impl ConfirmationType {
+    fn parse(value: Option<&str>) -> Result<Self, &'static str> {
+        match value {
+            None | Some("all") => Ok(Self::All),
+            Some("active") => Ok(Self::Active),
+            Some("inactive") => Ok(Self::Inactive),
+            Some("active_quorum") => Ok(Self::ActiveQuorum),
+            Some("active_confirmation_height") => Ok(Self::ActiveConfirmationHeight),
+            Some(_) => Err("invalid value for confirmation_type"),
+        }
+    }
+
+    /// Whether a confirmation with this classification passes the filter.
+    ///
+    /// `active` covers both active classifications, as the node documents. An
+    /// unrecognised classification is kept rather than dropped: the node may add
+    /// one, and silently losing events would be worse than delivering an extra.
+    fn accepts(self, confirmation_type: Option<&str>) -> bool {
+        let Some(confirmation_type) = confirmation_type else {
+            return self == Self::All;
+        };
+        match self {
+            Self::All => true,
+            Self::Active => matches!(
+                confirmation_type,
+                "active_quorum" | "active_confirmation_height"
+            ),
+            Self::Inactive => confirmation_type == "inactive",
+            Self::ActiveQuorum => confirmation_type == "active_quorum",
+            Self::ActiveConfirmationHeight => confirmation_type == "active_confirmation_height",
+        }
+    }
+}
+
+impl StreamOptions {
+    /// Read the options from a JSON object, as sent in a POST body.
+    fn from_object(object: &serde_json::Map<String, Value>) -> Result<Self, &'static str> {
+        for (name, value) in object {
+            let known = matches!(
+                name.as_str(),
+                "confirmation_type"
+                    | "accounts"
+                    | "all_local_accounts"
+                    | "include_block"
+                    | "include_election_info"
+                    | "include_sideband_info"
+            );
+            if !known {
+                return Err("unknown subscription option");
+            }
+            let valid = if name == "accounts" {
+                value.as_array().is_some_and(|accounts| {
+                    !accounts.is_empty()
+                        && accounts
+                            .iter()
+                            .all(|account| account.as_str().is_some_and(|a| !a.is_empty()))
+                })
+            } else {
+                value.is_boolean() || value.is_string()
+            };
+            if !valid {
+                return Err("invalid subscription option");
+            }
+        }
+        let accounts = object
+            .get("accounts")
+            .and_then(Value::as_array)
+            .map(|accounts| {
+                accounts
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            });
+        if let Some(accounts) = &accounts {
+            if accounts.len() > MAX_BODY_ACCOUNT_ITEMS {
+                return Err("too many accounts in filter");
+            }
+        }
+        let confirmation_type =
+            ConfirmationType::parse(object.get("confirmation_type").and_then(Value::as_str))?;
+        let include_block = object
+            .get("include_block")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        // The node documents that omitting block content is incompatible with account
+        // filtering, because account filtering needs the block to work. Honour the
+        // restriction rather than silently delivering one or the other.
+        let accounts_are_set = accounts
+            .as_ref()
+            .is_some_and(|accounts| !accounts.is_empty());
+        if !include_block && accounts_are_set {
+            return Err("include_block false is incompatible with an accounts filter");
+        }
+        Ok(Self {
+            confirmation_type,
+            accounts,
+            include_block,
+            include_election_info: object
+                .get("include_election_info")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            include_sideband_info: object
+                .get("include_sideband_info")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
+    }
+
+    /// Read the options from the query string, as sent by EventSource.
+    ///
+    /// A comma-separated list is the form a URL can carry; a JSON array in the query
+    /// is accepted too so that the same options object can be posted or queried.
+    fn from_query(query: &EventsQuery) -> Result<Self, &'static str> {
+        let Some(accounts) = query.accounts.as_deref() else {
+            return Ok(Self::default());
+        };
+        let accounts = accounts
+            .split(',')
+            .map(str::trim)
+            .filter(|account| !account.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if accounts.is_empty() {
+            return Ok(Self::default());
+        }
+        if accounts.len() > MAX_ACCOUNT_FILTER_ITEMS {
+            return Err("too many accounts in filter");
+        }
+        if query.accounts.as_deref().map(str::len).unwrap_or(0) > MAX_ACCOUNT_FILTER_BYTES {
+            return Err("account filter is too large");
+        }
+        Ok(Self {
+            accounts: Some(accounts),
+            ..Self::default()
+        })
+    }
+
+    fn matches(&self, event: &NanoEvent) -> bool {
+        event.event == "nano.confirmation"
+            && self
+                .confirmation_type
+                .accepts(event.data.get("confirmation_type").and_then(Value::as_str))
+            && event_matches_accounts(event, self.accounts.as_deref())
+    }
+
+    /// Apply the response options the node would have applied upstream.
+    ///
+    /// The gateway's own upstream subscription asks for election and sideband
+    /// information unconditionally so a subscriber that wants them is served from
+    /// the one socket. A subscriber that did not ask for them does not receive them,
+    /// which is what the node would have done.
+    fn project(&self, event: &NanoEvent) -> NanoEvent {
+        let mut data = event.data.clone();
+        if let Some(fields) = data.as_object_mut() {
+            if !self.include_block {
+                fields.remove("block");
+            }
+            if !self.include_election_info {
+                fields.remove("election_info");
+            }
+            if !self.include_sideband_info {
+                if let Some(block) = fields.get_mut("block").and_then(Value::as_object_mut) {
+                    block.remove("height");
+                    block.remove("local_timestamp");
+                }
+            }
+        }
+        NanoEvent {
+            event: event.event.clone(),
+            data,
+        }
+    }
+}
+
+impl Default for StreamOptions {
+    fn default() -> Self {
+        Self {
+            confirmation_type: ConfirmationType::All,
+            accounts: None,
+            include_block: true,
+            include_election_info: false,
+            include_sideband_info: false,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
     accounts: Option<String>,
-}
-
-impl EventsQuery {
-    /// The node documents one filter for the confirmation topic: `accounts`. A block
-    /// hash filter would be gateway-only, so a client wanting one filters the events
-    /// it receives.
-    fn accounts(&self) -> Result<Option<Vec<String>>, &'static str> {
-        let Some(value) = self.accounts.as_deref() else {
-            return Ok(None);
-        };
-        if value.len() > MAX_ACCOUNT_FILTER_BYTES {
-            return Err("account filter is too large");
-        }
-        let values = value
-            .split(',')
-            .filter(|item| !item.is_empty())
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        if values.len() > MAX_ACCOUNT_FILTER_ITEMS {
-            return Err("too many accounts in filter");
-        }
-        Ok(Some(values))
-    }
 }
 
 fn accounts_equal(left: &str, right: &str) -> bool {
@@ -2606,26 +2823,53 @@ fn event_matches_accounts(item: &NanoEvent, accounts: Option<&[String]>) -> bool
         )
 }
 
+/// The confirmation stream, reachable two ways.
+///
+/// GET is what EventSource speaks, so a browser can subscribe with no custom code,
+/// at the cost of carrying the account filter in the request line. POST takes the
+/// same options as a JSON body and streams the identical response, which lifts the
+/// request-line ceiling at the cost of a fetch-and-read client. Neither supports
+/// changing the filter on a live stream: that needs a client-to-server message, which
+/// SSE does not carry. A client that needs to change its tracked set opens a new
+/// stream, and reconciles afterwards as the upstream guide already requires.
 async fn sse_handler(
     State(state): State<AppState>,
-    axum::extract::Query(query): axum::extract::Query<EventsQuery>,
+    method: axum::http::Method,
+    query: Option<axum::extract::Query<EventsQuery>>,
+    body: Option<Json<Value>>,
 ) -> Response {
-    let accounts = match query.accounts() {
-        Ok(accounts) => accounts,
-        Err(message) => {
-            state.metrics.errors.fetch_add(1, Ordering::Relaxed);
-            return (StatusCode::BAD_REQUEST, Json(json!({"error": message}))).into_response();
+    let options = match method {
+        axum::http::Method::GET => {
+            let query = query.map(|axum::extract::Query(query)| query);
+            StreamOptions::from_query(&query.unwrap_or(EventsQuery { accounts: None }))
+        }
+        _ => {
+            let body = body.map(|Json(body)| body);
+            let Some(Value::Object(object)) = body else {
+                return bad_request(&state, "a POST body must be a JSON object");
+            };
+            StreamOptions::from_object(&object)
         }
     };
+    let options = match options {
+        Ok(options) => options,
+        Err(message) => return bad_request(&state, message),
+    };
+
     state.metrics.active_streams.fetch_add(1, Ordering::Relaxed);
-    let account_filter_count = accounts.as_ref().map_or(0, Vec::len);
+    let account_filter_count = options.accounts.as_ref().map_or(0, Vec::len);
     let log_rpc = state.config.log_rpc;
     let started = Instant::now();
     if log_rpc {
         tracing::info!(
             target: "nano_rpc_gateway::sse",
             event = "sse_session_created",
+            method = %method,
             account_filter_count,
+            confirmation_type = ?options.confirmation_type,
+            include_block = options.include_block,
+            include_election_info = options.include_election_info,
+            include_sideband_info = options.include_sideband_info,
             upstream_ws_circuit = if state.upstream_ready.load(Ordering::Acquire) {
                 "existing"
             } else {
@@ -2645,8 +2889,8 @@ async fn sse_handler(
         };
         loop {
             match receiver.recv().await {
-                Ok(item) if event_matches_accounts(&item, accounts.as_deref()) => {
-                    yield Ok::<Event, Infallible>(sse_event(item));
+                Ok(item) if options.matches(&item) => {
+                    yield Ok::<Event, Infallible>(sse_event(options.project(&item)));
                 }
                 Ok(_) => {}
                 // A subscriber that cannot keep up is closed, not told about it.
@@ -2656,8 +2900,12 @@ async fn sse_handler(
             }
         }
     };
+    // The node answers a keepalive with an acknowledgement. SSE has no channel to
+    // carry one back, so the gateway emits a comment on the same interval: it keeps
+    // intermediaries from treating an idle stream as dead, which is the job the
+    // node's ping does on the WebSocket.
     let mut response = Sse::new(output)
-        .keep_alive(KeepAlive::default())
+        .keep_alive(KeepAlive::new().interval(STREAM_KEEPALIVE))
         .into_response();
     response.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -2668,6 +2916,11 @@ async fn sse_handler(
         header::HeaderValue::from_static("no"),
     );
     response
+}
+
+fn bad_request(state: &AppState, message: &str) -> Response {
+    state.metrics.errors.fetch_add(1, Ordering::Relaxed);
+    (StatusCode::BAD_REQUEST, Json(json!({"error": message}))).into_response()
 }
 
 pub async fn run_ws_bridge(state: AppState) -> Result<(), GatewayError> {
@@ -2738,7 +2991,17 @@ async fn run_ws_bridge_with_confirmation_liveness(
         };
         if let Err(error) = socket
             .send(Message::Text(
-                json!({"action":"subscribe","topic":"confirmation","ack":true}).to_string(),
+                json!({"action":"subscribe","topic":"confirmation","ack":true,"options":{
+                    // Unfiltered, so no subscriber can miss a notification the way an
+                    // upstream-side confirmation_type filter would let it.
+                    "confirmation_type":"all",
+                    // The election and sideband fields are requested unconditionally so
+                    // a subscription asking for them is served from this one socket
+                    // rather than needing an upstream connection of its own. A
+                    // subscriber that did not ask for them does not receive them.
+                    "include_election_info":true,
+                    "include_sideband_info":true
+                }}).to_string(),
             ))
             .await
         {
@@ -3858,20 +4121,18 @@ node_ws_urls:
         assert_eq!(encoded.len(), 66 * 100 - 1);
         assert!(encoded.len() <= MAX_ACCOUNT_FILTER_BYTES);
         assert!(hundred.len() <= MAX_ACCOUNT_FILTER_ITEMS);
-        assert!(EventsQuery {
+        assert!(StreamOptions::from_query(&EventsQuery {
             accounts: Some(encoded)
-        }
-        .accounts()
+        })
         .is_ok());
 
         let overflow = (0..=MAX_ACCOUNT_FILTER_ITEMS)
             .map(|index| format!("nano_{index:0>60}"))
             .collect::<Vec<_>>()
             .join(",");
-        assert!(EventsQuery {
+        assert!(StreamOptions::from_query(&EventsQuery {
             accounts: Some(overflow)
-        }
-        .accounts()
+        })
         .is_err());
     }
 

@@ -3,7 +3,7 @@
 <body><header><a class="brand" href="#top"><span class="mark">N</span><span>Nano Gateway<small>nano-node/V28.2</small></span></a><nav><a href="openrpc.json">OpenRPC JSON</a><a href="asyncapi.json">AsyncAPI JSON</a></nav></header>
 <main id="top"><section class="hero"><p class="kicker">Nano Gateway API</p><h1>Query accounts and track confirmations</h1><p>Use Nano RPC to read ledger state or submit a block. Use the SSE stream to watch account activity and refresh balances when a block is cemented.</p><label class="search"><span>Search methods, events, and fields</span><input id="search" type="search" placeholder="Try accounts_balances or confirmed_frontier" autocomplete="off"></label></section>
 <section class="tools" aria-labelledby="tools-title"><div><p class="eyebrow">Live tools</p><h2 id="tools-title">Test the published contracts</h2><p>Open a standard schema tool. The RPC tool reads the OpenRPC server hint and lets you change the endpoint; AsyncAPI Studio loads the receive contract for inspection and validation.</p></div><div class="tool-links"><a class="tool-link" data-tool="openrpc" href="https://playground.open-rpc.org/" target="_blank" rel="noreferrer">OpenRPC Playground <span aria-hidden="true">↗</span></a><a class="tool-link" data-tool="asyncapi" href="https://studio.asyncapi.com/" target="_blank" rel="noreferrer">AsyncAPI Studio <span aria-hidden="true">↗</span></a></div></section>
-<div class="tabs" role="tablist" aria-label="Reference section"><button class="tab active" data-tab="rpc" role="tab" aria-controls="rpc" aria-selected="true">RPC <span>11</span></button><button class="tab" data-tab="events" role="tab" aria-controls="events" aria-selected="false">Events <span>2</span></button></div>
+<div class="tabs" role="tablist" aria-label="Reference section"><button class="tab active" data-tab="rpc" role="tab" aria-controls="rpc" aria-selected="true">RPC <span>14</span></button><button class="tab" data-tab="events" role="tab" aria-controls="events" aria-selected="false">Events <span>1</span></button></div>
 <section id="rpc" class="panel active" role="tabpanel"><div class="intro"><h2>Nano RPC methods</h2><p>Send JSON-RPC requests to the gateway. Each entry shows an example request and the JSON result shape. Values in the result shape are type placeholders.</p></div><article id="rpc-version" data-entry="version Read the upstream node version. {
   &quot;jsonrpc&quot;: &quot;2.0&quot;,
   &quot;method&quot;: &quot;version&quot;,
@@ -11,7 +11,14 @@
   &quot;id&quot;: 1
 } {
   &quot;result&quot;: {
-    &quot;rpc_version&quot;: &quot;&lt;string&gt;&quot;
+    &quot;build_info&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;network&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;network_identifier&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;node_vendor&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;protocol_version&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;rpc_version&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;store_vendor&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;store_version&quot;: &quot;&lt;string&gt;&quot;
   }
 }"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>version</h2><p>Read the upstream node version.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
@@ -20,7 +27,14 @@
   <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
 <span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
-    <span class="hljs-attr">&quot;rpc_version&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
+    <span class="hljs-attr">&quot;build_info&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;network&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;network_identifier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;node_vendor&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;protocol_version&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;rpc_version&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;store_vendor&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;store_version&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
   <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article>
 <article id="rpc-block_count" data-entry="block_count Read upstream ledger block counts. {
@@ -55,15 +69,23 @@
   &quot;id&quot;: 1
 } {
   &quot;result&quot;: {
+    &quot;account_version&quot;: &quot;&lt;string&gt;&quot;,
     &quot;balance&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;block_count&quot;: &quot;&lt;string&gt;&quot;,
     &quot;confirmation_height&quot;: &quot;&lt;string&gt;&quot;,
-    &quot;confirmation_height_frontier&quot;: &quot;&lt;string | null&gt;&quot;,
+    &quot;confirmation_height_frontier&quot;: &quot;&lt;string&gt;&quot;,
     &quot;confirmed_balance&quot;: &quot;&lt;string&gt;&quot;,
-    &quot;confirmed_frontier&quot;: &quot;&lt;string | null&gt;&quot;,
-    &quot;frontier&quot;: &quot;&lt;string | null&gt;&quot;,
-    &quot;open_block&quot;: &quot;&lt;string | null&gt;&quot;,
-    &quot;opened&quot;: &quot;&lt;boolean&gt;&quot;,
-    &quot;representative_block&quot;: &quot;&lt;string | null&gt;&quot;
+    &quot;confirmed_frontier&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;confirmed_height&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;confirmed_receivable&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;confirmed_representative&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;frontier&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;modified_timestamp&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;open_block&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;receivable&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;representative&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;representative_block&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;weight&quot;: &quot;&lt;string&gt;&quot;
   }
 }"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>account_info</h2><p>Read current and confirmed frontier state for one account.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
@@ -74,15 +96,23 @@
   <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
 <span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;account_version&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;balance&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;block_count&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;confirmation_height&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;confirmation_height_frontier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string | null&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;confirmation_height_frontier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;confirmed_balance&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;confirmed_frontier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string | null&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;frontier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string | null&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;open_block&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string | null&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;opened&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;boolean&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;representative_block&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string | null&gt;&quot;</span>
+    <span class="hljs-attr">&quot;confirmed_frontier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;confirmed_height&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;confirmed_receivable&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;confirmed_representative&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;frontier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;modified_timestamp&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;open_block&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;receivable&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;representative&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;representative_block&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;weight&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
   <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article>
 <article id="rpc-receivable" data-entry="receivable Read receivable blocks for an account. {
@@ -93,13 +123,9 @@
   },
   &quot;id&quot;: 1
 } {
-  &quot;result&quot;: [
-    {
-      &quot;amount&quot;: &quot;&lt;string&gt;&quot;,
-      &quot;hash&quot;: &quot;&lt;string&gt;&quot;,
-      &quot;source&quot;: &quot;&lt;string&gt;&quot;
-    }
-  ]
+  &quot;result&quot;: {
+    &quot;blocks&quot;: &quot;&lt;array | object | object&gt;&quot;
+  }
 }"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>receivable</h2><p>Read receivable blocks for an account.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;receivable&quot;</span><span class="hljs-punctuation">,</span>
@@ -108,13 +134,9 @@
   <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
 <span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
-  <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
-    <span class="hljs-punctuation">{</span>
-      <span class="hljs-attr">&quot;amount&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-      <span class="hljs-attr">&quot;hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-      <span class="hljs-attr">&quot;source&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
-    <span class="hljs-punctuation">}</span>
-  <span class="hljs-punctuation">]</span>
+  <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;blocks&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;array | object | object&gt;&quot;</span>
+  <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article>
 <article id="rpc-account_balance" data-entry="account_balance Read balance and receivable state for one account. {
   &quot;jsonrpc&quot;: &quot;2.0&quot;,
@@ -195,8 +217,27 @@
   &quot;result&quot;: {
     &quot;account&quot;: &quot;&lt;string&gt;&quot;,
     &quot;history&quot;: [
-      &quot;&lt;value&gt;&quot;
-    ]
+      {
+        &quot;account&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;amount&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;balance&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;confirmed&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;hash&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;height&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;link&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;link_as_account&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;linked_account&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;local_timestamp&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;previous&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;representative&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;signature&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;subtype&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;type&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;work&quot;: &quot;&lt;string&gt;&quot;
+      }
+    ],
+    &quot;next&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;previous&quot;: &quot;&lt;string&gt;&quot;
   }
 }"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>account_history</h2><p>Read account history.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
@@ -209,8 +250,27 @@
   <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
     <span class="hljs-attr">&quot;account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;history&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
-      <span class="hljs-string">&quot;&lt;value&gt;&quot;</span>
-    <span class="hljs-punctuation">]</span>
+      <span class="hljs-punctuation">{</span>
+        <span class="hljs-attr">&quot;account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;amount&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;balance&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;confirmed&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;height&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;link&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;link_as_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;linked_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;local_timestamp&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;previous&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;representative&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;signature&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;subtype&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;work&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
+      <span class="hljs-punctuation">}</span>
+    <span class="hljs-punctuation">]</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;next&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;previous&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
   <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article>
 <article id="rpc-block_info" data-entry="block_info Read block metadata and whether the block is cemented. {
@@ -224,14 +284,16 @@
   &quot;result&quot;: {
     &quot;amount&quot;: &quot;&lt;string&gt;&quot;,
     &quot;balance&quot;: &quot;&lt;string&gt;&quot;,
-    &quot;block&quot;: {
-      &quot;&lt;key&gt;&quot;: &quot;&lt;value&gt;&quot;
-    },
     &quot;block_account&quot;: &quot;&lt;string&gt;&quot;,
-    &quot;confirmed&quot;: &quot;&lt;boolean&gt;&quot;,
-    &quot;hash&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;confirmed&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;contents&quot;: &quot;&lt;value&gt;&quot;,
     &quot;height&quot;: &quot;&lt;string&gt;&quot;,
-    &quot;subtype&quot;: &quot;&lt;string&gt;&quot;
+    &quot;linked_account&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;local_timestamp&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;receive_hash&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;source_account&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;subtype&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;successor&quot;: &quot;&lt;string&gt;&quot;
   }
 }"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>block_info</h2><p>Read block metadata and whether the block is cemented.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
@@ -244,14 +306,16 @@
   <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
     <span class="hljs-attr">&quot;amount&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;balance&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;block&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
-      <span class="hljs-attr">&quot;&lt;key&gt;&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;value&gt;&quot;</span>
-    <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;block_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;confirmed&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;boolean&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;confirmed&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;contents&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;value&gt;&quot;</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;height&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;subtype&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
+    <span class="hljs-attr">&quot;linked_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;local_timestamp&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;receive_hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;source_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;subtype&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;successor&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
   <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article>
 <article id="rpc-blocks_info" data-entry="blocks_info Read metadata for several blocks. {
@@ -269,16 +333,21 @@
       &quot;&lt;key&gt;&quot;: {
         &quot;amount&quot;: &quot;&lt;string&gt;&quot;,
         &quot;balance&quot;: &quot;&lt;string&gt;&quot;,
-        &quot;block&quot;: {
-          &quot;&lt;key&gt;&quot;: &quot;&lt;value&gt;&quot;
-        },
         &quot;block_account&quot;: &quot;&lt;string&gt;&quot;,
-        &quot;confirmed&quot;: &quot;&lt;boolean&gt;&quot;,
-        &quot;hash&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;confirmed&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;contents&quot;: &quot;&lt;value&gt;&quot;,
         &quot;height&quot;: &quot;&lt;string&gt;&quot;,
-        &quot;subtype&quot;: &quot;&lt;string&gt;&quot;
+        &quot;linked_account&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;local_timestamp&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;receive_hash&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;source_account&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;subtype&quot;: &quot;&lt;string&gt;&quot;,
+        &quot;successor&quot;: &quot;&lt;string&gt;&quot;
       }
-    }
+    },
+    &quot;blocks_not_found&quot;: [
+      &quot;&lt;string&gt;&quot;
+    ]
   }
 }"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>blocks_info</h2><p>Read metadata for several blocks.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
@@ -295,16 +364,112 @@
       <span class="hljs-attr">&quot;&lt;key&gt;&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
         <span class="hljs-attr">&quot;amount&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
         <span class="hljs-attr">&quot;balance&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-        <span class="hljs-attr">&quot;block&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
-          <span class="hljs-attr">&quot;&lt;key&gt;&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;value&gt;&quot;</span>
-        <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
         <span class="hljs-attr">&quot;block_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-        <span class="hljs-attr">&quot;confirmed&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;boolean&gt;&quot;</span><span class="hljs-punctuation">,</span>
-        <span class="hljs-attr">&quot;hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;confirmed&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;contents&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;value&gt;&quot;</span><span class="hljs-punctuation">,</span>
         <span class="hljs-attr">&quot;height&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
-        <span class="hljs-attr">&quot;subtype&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
+        <span class="hljs-attr">&quot;linked_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;local_timestamp&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;receive_hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;source_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;subtype&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+        <span class="hljs-attr">&quot;successor&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
       <span class="hljs-punctuation">}</span>
+    <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;blocks_not_found&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+      <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
+    <span class="hljs-punctuation">]</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre></section></div></article>
+<article id="rpc-accounts_frontiers" data-entry="accounts_frontiers Read the head block hash for each account. {
+  &quot;jsonrpc&quot;: &quot;2.0&quot;,
+  &quot;method&quot;: &quot;accounts_frontiers&quot;,
+  &quot;params&quot;: {
+    &quot;accounts&quot;: [
+      &quot;&lt;account&gt;&quot;
+    ]
+  },
+  &quot;id&quot;: 1
+} {
+  &quot;result&quot;: {
+    &quot;errors&quot;: {
+      &quot;&lt;key&gt;&quot;: &quot;&lt;string&gt;&quot;
+    },
+    &quot;frontiers&quot;: {
+      &quot;&lt;key&gt;&quot;: &quot;&lt;string&gt;&quot;
+    }
+  }
+}"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>accounts_frontiers</h2><p>Read the head block hash for each account.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;accounts_frontiers&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;params&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;accounts&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+      <span class="hljs-string">&quot;&lt;account&gt;&quot;</span>
+    <span class="hljs-punctuation">]</span>
+  <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
+<span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;errors&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;&lt;key&gt;&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
+    <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;frontiers&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;&lt;key&gt;&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
     <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre></section></div></article>
+<article id="rpc-accounts_receivable" data-entry="accounts_receivable Read receivable blocks for several accounts. {
+  &quot;jsonrpc&quot;: &quot;2.0&quot;,
+  &quot;method&quot;: &quot;accounts_receivable&quot;,
+  &quot;params&quot;: {
+    &quot;accounts&quot;: [
+      &quot;&lt;account&gt;&quot;
+    ]
+  },
+  &quot;id&quot;: 1
+} {
+  &quot;result&quot;: {
+    &quot;blocks&quot;: {
+      &quot;&lt;key&gt;&quot;: &quot;&lt;array | object | object&gt;&quot;
+    }
+  }
+}"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>accounts_receivable</h2><p>Read receivable blocks for several accounts.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;accounts_receivable&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;params&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;accounts&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">[</span>
+      <span class="hljs-string">&quot;&lt;account&gt;&quot;</span>
+    <span class="hljs-punctuation">]</span>
+  <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
+<span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;blocks&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+      <span class="hljs-attr">&quot;&lt;key&gt;&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;array | object | object&gt;&quot;</span>
+    <span class="hljs-punctuation">}</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span></code></pre></section></div></article>
+<article id="rpc-block_confirm" data-entry="block_confirm Request confirmation for a block from online representatives. {
+  &quot;jsonrpc&quot;: &quot;2.0&quot;,
+  &quot;method&quot;: &quot;block_confirm&quot;,
+  &quot;params&quot;: {
+    &quot;hash&quot;: &quot;&lt;hash&gt;&quot;
+  },
+  &quot;id&quot;: 1
+} {
+  &quot;result&quot;: {
+    &quot;started&quot;: &quot;&lt;string&gt;&quot;
+  }
+}"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>block_confirm</h2><p>Request confirmation for a block from online representatives.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;block_confirm&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;params&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;hash&gt;&quot;</span>
+  <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
+<span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;started&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
   <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article>
 <article id="rpc-process" data-entry="process Submit a precomputed block and return its hash. {
@@ -315,9 +480,7 @@
   },
   &quot;id&quot;: 1
 } {
-  &quot;result&quot;: {
-    &quot;hash&quot;: &quot;&lt;string&gt;&quot;
-  }
+  &quot;result&quot;: &quot;&lt;object | object&gt;&quot;
 }"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>process</h2><p>Submit a precomputed block and return its hash.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;process&quot;</span><span class="hljs-punctuation">,</span>
@@ -326,9 +489,7 @@
   <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
 <span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
-  <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
-    <span class="hljs-attr">&quot;hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
-  <span class="hljs-punctuation">}</span>
+  <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;object | object&gt;&quot;</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article>
 <article id="rpc-rpc-discover" data-entry="rpc.discover Return the OpenRPC document. {
   &quot;jsonrpc&quot;: &quot;2.0&quot;,
@@ -349,18 +510,23 @@
     <span class="hljs-attr">&quot;&lt;key&gt;&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;value&gt;&quot;</span>
   <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article></section>
-<section id="events" class="panel" role="tabpanel"><div class="intro"><h2>Account confirmation stream</h2><p>Open <code>GET /events/confirmations</code> and filter by accounts or hashes. Each SSE record contains a JSON-RPC notification. Send <code>Last-Event-ID</code> when reconnecting.</p></div><section class="task-guide" id="event-watch-account" data-entry="watch account transfer send receive confirmation balance receivable frontier reset replay process block_info accounts_balances account_info">
+<section id="events" class="panel" role="tabpanel"><div class="intro"><h2>Account confirmation stream</h2><p>Open <code>GET /events/confirmations</code>, or <code>POST</code> it with the subscribe options as a JSON body, and filter by accounts. Each SSE record contains a JSON-RPC notification.</p></div><section class="task-guide" id="event-watch-account" data-entry="watch account transfer send receive confirmation balance receivable frontier reset replay process block_info accounts_balances account_info">
 <div class="eyebrow">Account tracking</div>
 <h2>Watch accounts and update local state</h2>
 <p>Use this sequence to track a send or receive from submission to cementing. The stream reports cemented blocks only. It does not report votes or election progress.</p>
 <div class="guide-grid">
-<section><h3>Notification types</h3><ul><li><code>nano.confirmation</code> identifies a matching cemented block.</li><li><code>nano.stream_reset</code> means that the event cursor is no longer continuous. Reconcile before processing later events.</li><li>Use <code>params.hash</code> as the idempotency key. Store it and ignore duplicates.</li><li><code>params.subtype</code> identifies a state send or receive when the node provides it.</li></ul></section>
+<section><h3>Notification types</h3><ul><li><code>nano.confirmation</code> identifies a matching cemented block.</li><li>When the stream closes, the upstream node WebSocket went away. Reconcile before applying later events.</li><li>Use <code>params.hash</code> as the idempotency key. Store it and ignore duplicates; the node can send the same confirmation more than once.</li><li><code>params.subtype</code> inside <code>params.block</code> identifies a state send or receive.</li><li><code>params.time</code> is the event time in milliseconds since the epoch.</li></ul></section>
 <section><h3>Stream limits</h3><ul><li>The stream does not emit aggregate balances, derived balance events, votes, or telemetry.</li><li>A client must handle a confirmation that was not delivered.</li><li>Balance responses use <code>receivable</code>, not a <code>pending</code> field.</li></ul></section>
 </div>
 <h3>Track a recipient before sending</h3>
-<ol><li>Open <code>GET /events/confirmations?accounts=&lt;account&gt;[,&lt;account&gt;]</code>. Keep the connection open.</li><li>After the stream opens, call <a href="#rpc-accounts_balances"><code>accounts_balances</code></a> once with the watched accounts and <code>include_only_confirmed: true</code>. Store each <code>result.balances[account]</code> value.</li><li>Submit the block with <a href="#rpc-process"><code>process</code></a>. Persist <code>result.hash</code> as the submitted block hash.</li><li>When <code>nano.confirmation.params.hash</code> equals that hash, mark the submission cemented. A recipient filter matches an incoming state send through <code>params.destination</code>.</li><li>After each matching confirmation, call <a href="#rpc-accounts_balances"><code>accounts_balances</code></a> once for the complete watched set. Publish each returned <code>balance</code> and <code>receivable</code> value. This is event-triggered batch refresh, not polling.</li><li>Save the SSE <code>id:</code> value. Send it as <code>Last-Event-ID</code> when reconnecting.</li></ol>
+<ol><li>Open <code>GET /events/confirmations?accounts=&lt;account&gt;[,&lt;account&gt;]</code>, or <code>POST /events/confirmations</code> with the same options as a JSON body when the filter outgrows the request line. Keep the connection open.</li><li>After the stream opens, call <a href="#rpc-accounts_balances"><code>accounts_balances</code></a> once with the watched accounts and <code>include_only_confirmed: true</code>. Store each <code>result.balances[account]</code> value.</li><li>Submit the block with <a href="#rpc-process"><code>process</code></a>. Persist <code>result.hash</code> as the submitted block hash.</li><li>When <code>nano.confirmation.params.hash</code> equals that hash, mark the submission cemented. A recipient filter matches an incoming state send through <code>params.block.link_as_account</code>.</li><li>After each matching confirmation, call <a href="#rpc-accounts_balances"><code>accounts_balances</code></a> once for the complete watched set. Publish each returned <code>balance</code> and <code>receivable</code> value. This is event-triggered batch refresh, not polling.</li><li>There is no replay and no cursor. If the stream closes, or you change the tracked set, open a new stream and reconcile.</li></ol>
 <section class="example"><div class="example-head"><h3>SSE request</h3><button class="copy" type="button">Copy</button></div><pre><code>GET https://&lt;gateway&gt;/events/confirmations?accounts=nano_...%2Cnano_...
 Accept: text/event-stream</code></pre></section>
+<section class="example"><div class="example-head"><h3>SSE request with a body</h3><button class="copy" type="button">Copy</button></div><pre><code>POST https://&lt;gateway&gt;/events/confirmations
+Content-Type: application/json
+Accept: text/event-stream
+
+{"accounts": ["nano_...", "nano_..."], "confirmation_type": "all"}</code></pre></section>
 <section class="example"><div class="example-head"><h3>Batch state request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;accounts_balances&quot;</span><span class="hljs-punctuation">,</span>
@@ -377,35 +543,29 @@ Accept: text/event-stream</code></pre></section>
 <table><thead><tr><th>Path</th><th>Type</th><th>Meaning</th></tr></thead><tbody><tr><td><code>result.balances</code></td><td>object</td><td>One entry for each requested account. It is not a total.</td></tr><tr><td><code>result.balances[account].balance</code></td><td>string</td><td>Cemented account balance in RAW.</td></tr><tr><td><code>result.balances[account].receivable</code></td><td>string</td><td>Cemented incoming sends not yet received, in RAW.</td></tr><tr><td><code>result.errors[account]</code></td><td>string, optional</td><td>Native per-account validation error.</td></tr></tbody></table>
 <p><code>params.block.balance</code> is the balance of <code>params.account</code> after that block. For a send addressed to a watched recipient, it is the sender balance. Use <a href="#rpc-accounts_balances"><code>accounts_balances</code></a> for the full balance and receivable state of the recipient.</p>
 <h3>Handle a missing notification or reset</h3>
-<ol><li>When a submitted hash has no confirmation after about 5 seconds, call <a href="#rpc-block_info"><code>block_info</code></a> with that hash.</li><li>Read <code>result.confirmed</code>. A value of <code>true</code> means the block is cemented.</li><li>When <code>nano.stream_reset</code> arrives, refresh all watched accounts with <a href="#rpc-accounts_balances"><code>accounts_balances</code></a> before applying new confirmations.</li><li>Use <a href="#rpc-block_info"><code>block_info</code></a> for each submitted hash whose terminal state remains unknown.</li></ol>
+<ol><li>When a submitted hash has no confirmation after about 5 seconds, call <a href="#rpc-block_info"><code>block_info</code></a> with that hash.</li><li>Read <code>result.confirmed</code>. A value of <code>true</code> means the block is cemented.</li><li>When the stream closes, reconcile every tracked account with <a href="#rpc-accounts_frontiers"><code>accounts_frontiers</code></a> and <a href="#rpc-account_history"><code>account_history</code></a> before applying new confirmations. The gateway cannot resume a stream.</li><li>Use <a href="#rpc-block_info"><code>block_info</code></a> for each submitted hash whose terminal state remains unknown.</li></ol>
 <h3>Check the current account frontier</h3>
 <p>Use this sequence when you have an account but no submitted block hash. It checks whether the current frontier for that account is cemented.</p>
 <ol><li>Call <a href="#rpc-account_info"><code>account_info</code></a> for the account.</li><li>If <code>result.opened</code> is <code>false</code>, the account has no frontier.</li><li>Read <code>result.frontier</code>. This is the current frontier and can be ahead of cemented state.</li><li>Call <a href="#rpc-block_info"><code>block_info</code></a> with that hash. Read <code>result.confirmed</code>.</li><li>Use <code>result.confirmed_frontier</code> and <code>result.confirmed_balance</code> when you need the last known cemented account state.</li></ol>
+<h3>Detect every change with a frontier delta</h3>
+<p>The canonical refresh. Three batch calls plus one account_history per changed account, whatever the size of the account set.</p>
+<ol><li>accounts_frontiers with accounts: compare each result against the stored frontier hash.</li><li>account_history with head set to the stored hash, reverse true and raw true, for each changed account. head is inclusive, so the first entry is the head block itself: dedupe by hash rather than dropping entry 0. raw is required because the summary form skips change and epoch blocks.</li><li>accounts_receivable with source, for incoming blocks that are not yet received.</li><li>blocks_info with the new frontier hashes, and read confirmed. If false, escalate with block_confirm.</li></ol>
+<p><a href="#rpc-accounts_receivable"><code>accounts_receivable</code></a> also reports an incoming send that has not been received yet, with <code>source</code> to name the sender. <a href="#rpc-block_confirm"><code>block_confirm</code></a> asks online representatives to confirm a block; its result reports that no error occurred and never that the block confirmed.</p>
 <p class="source-note">The fallback delay and frontier sequence follow <a href="https://docs.nano.org/integration-guides/block-confirmation-tracking/#block-confirmation-tracking">the Nano confirmation-tracking guidance</a>. The gateway exposes the methods linked above.</p>
-</section><article id="event-nano-confirmation" data-entry="nano.confirmation A block from the configured Nano profile has been cemented. {&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;method&quot;:&quot;nano.confirmation&quot;,&quot;params&quot;:{&quot;account&quot;:&quot;nano_sender...&quot;,&quot;block&quot;:{&quot;link_as_account&quot;:&quot;nano_new_account...&quot;,&quot;subtype&quot;:&quot;send&quot;,&quot;type&quot;:&quot;state&quot;},&quot;confirmation_type&quot;:&quot;active_quorum&quot;,&quot;destination&quot;:&quot;nano_new_account...&quot;,&quot;hash&quot;:&quot;ABC123&quot;,&quot;profile&quot;:&quot;nano-node/V28.2&quot;,&quot;subtype&quot;:&quot;send&quot;}}"><div class="entry-info"><div class="eyebrow">SSE notification</div><h2>nano.confirmation</h2><p>A block from the configured Nano profile has been cemented.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Notification</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+</section><article id="event-nano-confirmation" data-entry="nano.confirmation A block from the configured Nano profile has been cemented. {&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;method&quot;:&quot;nano.confirmation&quot;,&quot;params&quot;:{&quot;account&quot;:&quot;nano_sender...&quot;,&quot;amount&quot;:&quot;10000000000000000000000000000000000&quot;,&quot;block&quot;:{&quot;link_as_account&quot;:&quot;nano_new_account...&quot;,&quot;subtype&quot;:&quot;send&quot;,&quot;type&quot;:&quot;state&quot;},&quot;confirmation_type&quot;:&quot;active_quorum&quot;,&quot;hash&quot;:&quot;ABC123&quot;,&quot;time&quot;:&quot;1564935350664&quot;}}"><div class="entry-info"><div class="eyebrow">SSE notification</div><h2>nano.confirmation</h2><p>A block from the configured Nano profile has been cemented.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Notification</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;nano.confirmation&quot;</span><span class="hljs-punctuation">,</span>
   <span class="hljs-attr">&quot;params&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
     <span class="hljs-attr">&quot;account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;nano_sender...&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;amount&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;10000000000000000000000000000000000&quot;</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;block&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
       <span class="hljs-attr">&quot;link_as_account&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;nano_new_account...&quot;</span><span class="hljs-punctuation">,</span>
       <span class="hljs-attr">&quot;subtype&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;send&quot;</span><span class="hljs-punctuation">,</span>
       <span class="hljs-attr">&quot;type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;state&quot;</span>
     <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;confirmation_type&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;active_quorum&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;destination&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;nano_new_account...&quot;</span><span class="hljs-punctuation">,</span>
     <span class="hljs-attr">&quot;hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;ABC123&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;profile&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;nano-node/V28.2&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;subtype&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;send&quot;</span>
-  <span class="hljs-punctuation">}</span>
-<span class="hljs-punctuation">}</span></code></pre></section></div></article>
-<article id="event-nano-stream_reset" data-entry="nano.stream_reset The stream lost continuity. Reconcile before processing more events. {&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;method&quot;:&quot;nano.stream_reset&quot;,&quot;params&quot;:{&quot;profile&quot;:&quot;nano-node/V28.2&quot;,&quot;reason&quot;:&quot;replay_unavailable&quot;,&quot;reconcile&quot;:&quot;Query authoritative Nano RPC state before applying new confirmations&quot;}}"><div class="entry-info"><div class="eyebrow">SSE notification</div><h2>nano.stream_reset</h2><p>The stream lost continuity. Reconcile before processing more events.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Notification</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
-  <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
-  <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;nano.stream_reset&quot;</span><span class="hljs-punctuation">,</span>
-  <span class="hljs-attr">&quot;params&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
-    <span class="hljs-attr">&quot;profile&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;nano-node/V28.2&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;reason&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;replay_unavailable&quot;</span><span class="hljs-punctuation">,</span>
-    <span class="hljs-attr">&quot;reconcile&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;Query authoritative Nano RPC state before applying new confirmations&quot;</span>
+    <span class="hljs-attr">&quot;time&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;1564935350664&quot;</span>
   <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article></section>
 <p id="empty" hidden>No contract entries match that search.</p></main><script>const openrpcUrl=new URL('openrpc.json',document.baseURI).href;const asyncapiUrl=new URL('asyncapi.json',document.baseURI).href;document.querySelector('[data-tool="openrpc"]').href='https://playground.open-rpc.org/?schemaUrl='+encodeURIComponent(openrpcUrl);document.querySelector('[data-tool="asyncapi"]').href='https://studio.asyncapi.com/?url='+encodeURIComponent(asyncapiUrl)</script><script src="assets/reference.js"></script></body></html>

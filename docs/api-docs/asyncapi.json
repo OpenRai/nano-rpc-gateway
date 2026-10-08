@@ -8,13 +8,10 @@
           "bindingVersion": "0.3.0"
         }
       },
-      "description": "Bounded process-local replay. Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose destination is a tracked account. For a send, params.hash equals the process result hash. Send Last-Event-ID to resume; deduplicate by hash. nano.stream_reset reports that replay or live continuity is unavailable; call block_info with each tracked hash and inspect result.confirmed.",
+      "description": "Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose link_as_account is a tracked account. For a send, params.hash equals the process result hash. Deduplicate by hash. When the upstream WebSocket drops the stream closes, as a node closing a WebSocket would; there is no replay and no gap announcement, so reconcile with accounts_frontiers and account_history before applying later events. The filter cannot be changed on a live stream: the node changes one with an update message carrying accounts_add and accounts_del, and SSE carries no client-to-server message. A client that needs to change its tracked set opens a new stream and reconciles afterwards. A client with more accounts than fit in a request line splits them across several streams, or POSTs the same options as a JSON body.",
       "messages": {
         "nanoConfirmation": {
           "$ref": "#/components/messages/nano.confirmation"
-        },
-        "nanoStreamReset": {
-          "$ref": "#/components/messages/nano.stream_reset"
         }
       },
       "servers": [
@@ -36,16 +33,15 @@
               "method": "nano.confirmation",
               "params": {
                 "account": "nano_sender...",
+                "amount": "10000000000000000000000000000000000",
                 "block": {
                   "link_as_account": "nano_new_account...",
                   "subtype": "send",
                   "type": "state"
                 },
                 "confirmation_type": "active_quorum",
-                "destination": "nano_new_account...",
                 "hash": "ABC123",
-                "profile": "nano-node/V28.2",
-                "subtype": "send"
+                "time": "1564935350664"
               }
             }
           }
@@ -73,45 +69,6 @@
         },
         "summary": "A block from the configured Nano profile has been cemented.",
         "title": "nano.confirmation"
-      },
-      "nano.stream_reset": {
-        "contentType": "application/json",
-        "examples": [
-          {
-            "payload": {
-              "jsonrpc": "2.0",
-              "method": "nano.stream_reset",
-              "params": {
-                "profile": "nano-node/V28.2",
-                "reason": "replay_unavailable",
-                "reconcile": "Query authoritative Nano RPC state before applying new confirmations"
-              }
-            }
-          }
-        ],
-        "name": "nano.stream_reset",
-        "payload": {
-          "additionalProperties": false,
-          "properties": {
-            "jsonrpc": {
-              "const": "2.0"
-            },
-            "method": {
-              "const": "nano.stream_reset"
-            },
-            "params": {
-              "$ref": "#/components/schemas/StreamResetParams"
-            }
-          },
-          "required": [
-            "jsonrpc",
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        "summary": "The stream lost continuity. Reconcile before processing more events.",
-        "title": "nano.stream_reset"
       }
     },
     "schemas": {
@@ -123,75 +80,118 @@
             "type": "string"
           },
           "amount": {
+            "description": "Block amount in raw.",
             "type": "string"
           },
           "block": {
             "additionalProperties": true,
-            "description": "Native confirmed block content when supplied by the upstream node.",
+            "description": "Native confirmed block content. `subtype` and `link_as_account` live here; the node keeps them inside the block.",
             "type": "object"
           },
           "confirmation_type": {
-            "type": "string"
-          },
-          "destination": {
-            "description": "Recipient of a state send when present; an accounts-filtered subscriber receives matching destination events.",
+            "description": "How the block was confirmed.",
+            "enum": [
+              "active_quorum",
+              "active_confirmation_height",
+              "inactive"
+            ],
             "type": "string"
           },
           "election_info": {
             "additionalProperties": true,
+            "description": "Present when the subscription requested include_election_info.",
+            "properties": {
+              "blocks": {
+                "type": "string"
+              },
+              "duration": {
+                "description": "Election duration in milliseconds.",
+                "type": "string"
+              },
+              "request_count": {
+                "type": "string"
+              },
+              "tally": {
+                "description": "Weight tally in raw.",
+                "type": "string"
+              },
+              "time": {
+                "description": "End of the election, in milliseconds since the epoch.",
+                "type": "string"
+              },
+              "voters": {
+                "type": "string"
+              }
+            },
             "type": "object"
           },
           "hash": {
             "description": "Cemented block hash. For a submitted block, this equals process result.hash and is the idempotency key.",
             "type": "string"
           },
-          "profile": {
-            "type": "string"
-          },
-          "subtype": {
-            "description": "Native state block subtype, such as send or receive, when supplied by the upstream node.",
+          "time": {
+            "description": "Event time in milliseconds since the epoch, from the upstream envelope.",
             "type": "string"
           }
         },
         "required": [
-          "profile",
-          "hash"
+          "account",
+          "amount",
+          "hash",
+          "confirmation_type"
         ],
         "type": "object"
       },
-      "StreamResetParams": {
+      "ConfirmationSubscribeOptions": {
         "additionalProperties": false,
         "properties": {
-          "profile": {
-            "type": "string"
+          "accounts": {
+            "description": "Only receive confirmations that mention these accounts. A state send matches on its owning account or its block's link_as_account. Legacy blocks are never delivered once a filter is given.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
-          "reason": {
+          "all_local_accounts": {
+            "default": false,
+            "description": "Accepted and ignored. It asks for accounts held in the node's own wallet, which is a custodial dev-ledger feature the gateway does not track and does not expose. A non-custodial integrator lists its own accounts in `accounts` instead, which is the equivalent behaviour. This is the one option the gateway does not pass upstream.",
+            "type": "boolean"
+          },
+          "confirmation_type": {
+            "default": "all",
+            "description": "Which confirmations to receive, filtered on the event's own confirmation_type. The upstream guide recommends leaving this unset so a notification is less likely to be missed.",
             "enum": [
-              "upstream_connected",
-              "upstream_reconnected",
-              "upstream_disconnected",
-              "upstream_closed",
-              "replay_unavailable",
-              "subscriber_lagged"
+              "all",
+              "active",
+              "inactive",
+              "active_quorum",
+              "active_confirmation_height"
             ],
             "type": "string"
           },
-          "reconcile": {
-            "type": "string"
+          "include_block": {
+            "default": true,
+            "description": "Include the block content. Omit the block from the payload when false. Incompatible with an accounts filter, as it is upstream.",
+            "type": "boolean"
+          },
+          "include_election_info": {
+            "default": false,
+            "description": "Add election_info to each confirmation. The gateway always requests it upstream so it is available when asked for.",
+            "type": "boolean"
+          },
+          "include_sideband_info": {
+            "default": false,
+            "description": "Add height and local_timestamp to the block. The gateway always requests it upstream so it is available when asked for.",
+            "type": "boolean"
           }
         },
-        "required": [
-          "reason",
-          "profile",
-          "reconcile"
-        ],
         "type": "object"
       }
     }
   },
   "defaultContentType": "application/json",
   "info": {
-    "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if a reset occurs or confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state.",
+    "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state.",
     "title": "Nano Gateway Events",
     "version": "0.1.0"
   },
@@ -205,22 +205,41 @@
           "query": {
             "properties": {
               "accounts": {
-                "description": "Comma-separated account filter. A match is a confirmed block owned by a tracked account (send or receive), or a state send addressed to a tracked account. nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied.",
-                "type": "string"
-              },
-              "hashes": {
-                "description": "Comma-separated block hash filter.",
+                "description": "Comma-separated account filter.",
                 "type": "string"
               }
             },
             "type": "object"
+          },
+          "x-nano-filter-ceiling": {
+            "maxAccounts": 110,
+            "maxBytes": 7680,
+            "why": "The node documents no cap. This bound is what an HTTP request line can carry, because nginx and Apache commonly limit one to about 8 KiB. A Nano address is 65 characters, so 110 accounts is 7259 bytes. Use POST, or split the set across several streams, to go beyond it."
           }
         }
       },
       "channel": {
         "$ref": "#/channels/confirmations"
       },
-      "summary": "Receive cemented Nano account confirmations and stream reset notifications."
+      "description": "GET carries the account filter in the request line, which is what EventSource speaks and needs no custom client code. It is bounded by what an intermediary accepts as a request line, commonly about 8 KiB, so roughly a hundred accounts.",
+      "summary": "Receive cemented Nano account confirmations."
+    },
+    "receiveConfirmationsWithBody": {
+      "action": "receive",
+      "bindings": {
+        "http": {
+          "bindingVersion": "0.3.0",
+          "method": "POST",
+          "query": {
+            "$ref": "#/components/schemas/ConfirmationSubscribeOptions"
+          }
+        }
+      },
+      "channel": {
+        "$ref": "#/channels/confirmations"
+      },
+      "description": "EventSource only issues GET, so a client whose filter outgrows the request line uses fetch and reads the response as a stream. The response is byte-for-byte the same SSE the GET form returns. Requires custom client code.",
+      "summary": "The same stream, with the subscribe options in a JSON body."
     }
   },
   "servers": {
@@ -232,12 +251,7 @@
   },
   "x-http-response": {
     "contentType": "text/event-stream",
-    "headers": {
-      "Last-Event-ID": {
-        "description": "Resume after this SSE event cursor.",
-        "type": "string"
-      }
-    }
+    "headers": {}
   },
   "x-nano-account-tracking": {
     "accounts_filter": "Subscribe with the watched accounts before any related process call.",
@@ -248,6 +262,15 @@
       "status_field": "result.confirmed",
       "status_method": "block_info",
       "when": "Use this flow when the known account frontier, rather than a submitted block hash, is the starting point. Query the current frontier and inspect its confirmation status."
+    },
+    "frontier_delta": {
+      "steps": [
+        "accounts_frontiers with accounts: compare each result against the stored frontier hash.",
+        "account_history with head set to the stored hash, reverse true and raw true, for each changed account. head is inclusive, so the first entry is the head block itself: dedupe by hash rather than dropping entry 0. raw is required because the summary form skips change and epoch blocks.",
+        "accounts_receivable with source, for incoming blocks that are not yet received.",
+        "blocks_info with the new frontier hashes, and read confirmed. If false, escalate with block_confirm."
+      ],
+      "when": "The canonical refresh. Three batch calls plus one account_history per changed account, whatever the size of the account set."
     },
     "not_provided": [
       "balance aggregation",
@@ -264,7 +287,7 @@
       "result": {
         "balances": "per-account balance and receivable values"
       },
-      "when": "Seed state once, then refresh in one batch after a matching confirmation or stream reset; do not poll."
+      "when": "Read balance and receivable totals after a matching confirmation. This cannot detect every change: it returns no hashes, and a representative-change block leaves the balance unchanged. Use the frontier delta sequence below when you need to detect changes rather than totals."
     }
   },
   "x-nano-confirmation-tracking": {
@@ -276,10 +299,27 @@
     },
     "fallback": {
       "confirmed_field": "result.confirmed",
+      "escalation": {
+        "method": "block_confirm",
+        "params": {
+          "hash": "process result hash"
+        },
+        "rate_limited": "An operator guard answers HTTP 429 with Retry-After and no JSON-RPC body.",
+        "result": {
+          "started": "Always the string 1. It reports that no error occurred, never that the block confirmed. The call also re-fires confirmation notifications for a block that is already confirmed."
+        }
+      },
       "method": "block_info",
       "params": {
         "hash": "process result hash"
       },
+      "sequence": [
+        "Wait about 5 seconds after a block of interest.",
+        "Call block_info with the hash and read result.confirmed.",
+        "If it is false, call block_confirm with the hash.",
+        "Expect a confirmation notification, then call block_info again.",
+        "Escalate any remaining delay in your own systems."
+      ],
       "suggested_delay_seconds": 5
     },
     "subscribe_before_process": true

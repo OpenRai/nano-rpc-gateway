@@ -1981,3 +1981,196 @@ async fn account_history_with_count_minus_one_returns_the_whole_chain() {
     // No truncation, so no `previous`.
     assert!(response["result"].get("previous").is_none());
 }
+
+async fn post_stream(
+    state: AppState,
+    options: Value,
+) -> (axum::http::StatusCode, axum::response::Response) {
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/events/confirmations")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(options.to_string()))
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    (response.status(), response)
+}
+
+async fn get_stream(
+    state: AppState,
+    query: &str,
+) -> (axum::http::StatusCode, axum::response::Response) {
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri(format!("/events/confirmations{query}"))
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("gateway response");
+    (response.status(), response)
+}
+
+async fn next_event(body: &mut axum::response::Response) -> String {
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), body.frame())
+        .await
+        .expect("frame timeout")
+        .expect("frame")
+        .expect("data")
+        .into_data()
+        .expect("bytes");
+    String::from_utf8_lossy(&frame).to_string()
+}
+
+#[tokio::test]
+async fn post_body_variant_carries_an_account_set_a_request_line_cannot() {
+    // EventSource only issues GET, so a client whose filter outgrows the request line
+    // posts the same options as a body. Both forms return the same stream.
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let big = (0..5000)
+        .map(|index| format!("nano_{index:0>60}"))
+        .collect::<Vec<_>>();
+    let (status, mut body) = post_stream(state.clone(), json!({"accounts": big})).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+
+    let watched = format!("nano_{:0>60}", 0);
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account": watched,"hash":"BODY","confirmation_type":"active_quorum"}),
+        )
+        .await;
+    let text = next_event(&mut body).await;
+    assert!(text.contains("BODY"), "{text}");
+}
+
+#[tokio::test]
+async fn both_verbs_reject_an_incompatible_filter_and_unknown_options() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    // The node documents that omitting block content is incompatible with account
+    // filtering, so the gateway refuses the combination rather than picking one.
+    let (status, _) = post_stream(
+        state.clone(),
+        json!({"accounts": ["nano_one"], "include_block": false}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+
+    // Options the node does not document for this topic are rejected rather than
+    // silently ignored.
+    let (status, _) = post_stream(state.clone(), json!({"nonsense": true})).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+
+    let (status, _) = post_stream(state, json!({"confirmation_type": "sideways"})).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn confirmation_type_and_response_options_are_applied_to_the_payload() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let (status, mut body) = post_stream(
+        state.clone(),
+        json!({"confirmation_type": "active", "include_election_info": true}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+
+    // Inactive is filtered out by confirmation_type active.
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({
+                "account":"nano_test","amount":"1","hash":"INACTIVE",
+                "confirmation_type":"inactive","time":"1"
+            }),
+        )
+        .await;
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({
+                "account":"nano_test","amount":"1","hash":"ACTIVE",
+                "confirmation_type":"active_quorum","time":"2",
+                "election_info":{"duration":"5","time":"1","tally":"9"},
+                "block":{"type":"state","subtype":"send","height":"7","local_timestamp":"3"}
+            }),
+        )
+        .await;
+    let text = next_event(&mut body).await;
+    assert!(text.contains("ACTIVE"), "{text}");
+    assert!(!text.contains("INACTIVE"), "{text}");
+    // election_info was requested, so it arrives. sideband info was not, so the
+    // block has no height or local_timestamp, exactly as the node would have sent it.
+    assert!(text.contains("election_info"), "{text}");
+    assert!(!text.contains("local_timestamp"), "{text}");
+    assert!(!text.contains("\"height\""), "{text}");
+}
+
+#[tokio::test]
+async fn sideband_and_block_fields_appear_only_when_asked() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let (status, mut body) = post_stream(
+        state.clone(),
+        json!({"include_sideband_info": true, "include_election_info": false}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({
+                "account":"nano_test","amount":"1","hash":"SIDEBAND",
+                "confirmation_type":"active_quorum","time":"2",
+                "election_info":{"duration":"5"},
+                "block":{"type":"state","subtype":"send","height":"7","local_timestamp":"3"}
+            }),
+        )
+        .await;
+    let text = next_event(&mut body).await;
+    assert!(text.contains("local_timestamp"), "{text}");
+    assert!(text.contains("height"), "{text}");
+    assert!(!text.contains("election_info"), "{text}");
+
+    let (status, mut body) = post_stream(state.clone(), json!({"include_block": false})).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({
+                "account":"nano_test","amount":"1","hash":"NOBLOCK",
+                "confirmation_type":"active_quorum","time":"2",
+                "block":{"type":"state","subtype":"send"}
+            }),
+        )
+        .await;
+    let text = next_event(&mut body).await;
+    assert!(text.contains("NOBLOCK"), "{text}");
+    assert!(!text.contains("\"block\""), "{text}");
+}
+
+#[tokio::test]
+async fn the_get_form_filters_by_account_the_same_way() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let (status, mut body) = get_stream(state.clone(), "?accounts=nano_watched").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account":"nano_other","hash":"OTHER","confirmation_type":"active_quorum"}),
+        )
+        .await;
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({"account":"nano_watched","hash":"MINE","confirmation_type":"active_quorum"}),
+        )
+        .await;
+    let text = next_event(&mut body).await;
+    assert!(text.contains("MINE"), "{text}");
+    assert!(!text.contains("OTHER"), "{text}");
+}
