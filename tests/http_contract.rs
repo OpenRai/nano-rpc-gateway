@@ -969,9 +969,30 @@ async fn confirmation_stream_uses_event_stream_content_type() {
 }
 
 #[tokio::test]
-async fn confirmation_stream_rejects_unbounded_account_filters() {
+async fn confirmation_stream_accepts_a_hundred_accounts_and_rejects_one_more() {
+    // The ceiling is what an HTTP request line can carry, so 100 accounts has to
+    // pass end to end rather than only in a unit test.
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
-    let oversized = "a".repeat(4097);
+    let hundred = (0..100)
+        .map(|index| format!("nano_{index:0>60}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri(format!("/events/confirmations?accounts={hundred}"))
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state.clone())
+        .oneshot(request)
+        .await
+        .expect("gateway response");
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    drop(response);
+
+    let oversized = (0..111)
+        .map(|index| format!("nano_{index:0>60}"))
+        .collect::<Vec<_>>()
+        .join(",");
     let request = axum::http::Request::builder()
         .method("GET")
         .uri(format!("/events/confirmations?accounts={oversized}"))

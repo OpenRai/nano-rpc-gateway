@@ -67,9 +67,18 @@ cors_origins:
   - "*"
 public_url: null
 "#;
-const EVENT_HISTORY_CAPACITY: usize = 256;
-const MAX_ACCOUNT_FILTER_BYTES: usize = 4096;
-const MAX_ACCOUNT_FILTER_ITEMS: usize = 64;
+/// A Nano address is 65 characters, so a comma-joined list of n accounts takes
+/// 66n - 1 bytes. These caps are sized to what an HTTP request line can actually
+/// carry rather than to what the node would accept, because the node documents no
+/// cap at all while nginx and Apache commonly limit a request line to about 8 KiB.
+/// A larger cap would pass every test here and then fail behind the first reverse
+/// proxy. 110 accounts is 7259 bytes, which leaves room for the path and the
+/// other parameters inside 8 KiB.
+const MAX_ACCOUNT_FILTER_BYTES: usize = 7680;
+/// Per-subscriber buffer. A subscriber that falls this far behind is closed, because
+/// the node offers no replay to catch up with.
+const SSE_QUEUE_CAPACITY: usize = 256;
+const MAX_ACCOUNT_FILTER_ITEMS: usize = 110;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -696,13 +705,17 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
         "operations": {
             "receiveConfirmations": {
                 "action": "receive",
-                "summary": "Receive cemented Nano account confirmations and stream reset notifications.",
+                "summary": "Receive cemented Nano account confirmations.",
                 "channel": {"$ref": "#/channels/confirmations"},
                 "bindings": {"http": {
                     "method": "GET",
                     "query": {"type": "object", "properties": {
-                        "accounts": {"type": "string", "description": "Comma-separated account filter. A match is a confirmed block owned by a tracked account (send or receive), or a state send addressed to a tracked account. nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied."},
-                        "hashes": {"type": "string", "description": "Comma-separated block hash filter."}
+                        "accounts": {"type": "string", "description": "Comma-separated account filter. A match is a confirmed block owned by a tracked account (send or receive), or a state send whose link_as_account is a tracked account. nano_ and xrb_ prefixes are equivalent. Legacy blocks are excluded when this filter is supplied."}
+                    },
+                    "x-nano-filter-ceiling": {
+                        "maxAccounts": MAX_ACCOUNT_FILTER_ITEMS,
+                        "maxBytes": MAX_ACCOUNT_FILTER_BYTES,
+                        "why": "The node documents no cap. These caps are sized to what an HTTP request line can carry, because nginx and Apache commonly limit one to about 8 KiB. A Nano address is 65 characters, so 110 accounts is 7259 bytes. To track a larger set, POST the account set in a request body instead."
                     }},
                     "bindingVersion": "0.3.0"
                 }}
@@ -1645,7 +1658,7 @@ impl Default for EventHub {
 
 impl EventHub {
     pub fn new() -> Self {
-        Self::with_capacity(256)
+        Self::with_capacity(SSE_QUEUE_CAPACITY)
     }
     /// A subscriber that falls this far behind is closed rather than told about it.
     pub fn with_capacity(capacity: usize) -> Self {
@@ -1824,7 +1837,6 @@ struct ActiveStreamGuard {
     log_rpc: bool,
     started: Instant,
     account_filter_count: usize,
-    hash_filter_count: usize,
 }
 
 struct RequestMetricsGuard {
@@ -1852,7 +1864,6 @@ impl Drop for ActiveStreamGuard {
                 event = "sse_session_closed",
                 duration_ms = self.started.elapsed().as_millis() as u64,
                 account_filter_count = self.account_filter_count,
-                hash_filter_count = self.hash_filter_count,
                 "SSE session closed"
             );
         }
@@ -1905,7 +1916,7 @@ impl AppState {
             .transpose()?;
         Ok(Self {
             native: NativeRouter::with_response_logging(&config.node_rpc_urls, config.log_rpc)?,
-            events: EventHub::new(),
+            events: EventHub::with_capacity(SSE_QUEUE_CAPACITY),
             metrics: Metrics::default(),
             ws_active: Arc::new(AtomicUsize::new(0)),
             ws_unhealthy_until: Arc::new(Mutex::new(vec![
@@ -2412,7 +2423,7 @@ nano_gateway_request_duration_ms_sum {}\nnano_gateway_request_duration_ms_count 
             state.metrics.active_streams.load(Ordering::Relaxed),
             state.metrics.overflow_resets.load(Ordering::Relaxed),
             state.metrics.upstream_reconnects.load(Ordering::Relaxed),
-            EVENT_HISTORY_CAPACITY,
+            SSE_QUEUE_CAPACITY,
             state
                 .metrics
                 .request_duration_ms_sum
@@ -2522,22 +2533,18 @@ async fn asyncapi_handler(State(state): State<AppState>) -> Response {
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
     accounts: Option<String>,
-    hashes: Option<String>,
 }
 
 impl EventsQuery {
-    fn filter(
-        value: Option<&str>,
-        label: &'static str,
-    ) -> Result<Option<Vec<String>>, &'static str> {
-        let Some(value) = value else {
+    /// The node documents one filter for the confirmation topic: `accounts`. A block
+    /// hash filter would be gateway-only, so a client wanting one filters the events
+    /// it receives.
+    fn accounts(&self) -> Result<Option<Vec<String>>, &'static str> {
+        let Some(value) = self.accounts.as_deref() else {
             return Ok(None);
         };
         if value.len() > MAX_ACCOUNT_FILTER_BYTES {
-            return Err(match label {
-                "account" => "account filter is too large",
-                _ => "hash filter is too large",
-            });
+            return Err("account filter is too large");
         }
         let values = value
             .split(',')
@@ -2545,25 +2552,10 @@ impl EventsQuery {
             .map(str::to_owned)
             .collect::<Vec<_>>();
         if values.len() > MAX_ACCOUNT_FILTER_ITEMS {
-            return Err(match label {
-                "account" => "too many accounts in filter",
-                _ => "too many hashes in filter",
-            });
+            return Err("too many accounts in filter");
         }
         Ok(Some(values))
     }
-
-    fn filters(&self) -> Result<EventFilters, &'static str> {
-        Ok(EventFilters {
-            accounts: Self::filter(self.accounts.as_deref(), "account")?,
-            hashes: Self::filter(self.hashes.as_deref(), "hash")?,
-        })
-    }
-}
-
-struct EventFilters {
-    accounts: Option<Vec<String>>,
-    hashes: Option<Vec<String>>,
 }
 
 fn accounts_equal(left: &str, right: &str) -> bool {
@@ -2588,73 +2580,45 @@ fn is_legacy_confirmation(item: &NanoEvent) -> bool {
         .is_some_and(|block_type| matches!(block_type, "open" | "send" | "receive" | "change"))
 }
 
-fn event_matches_filters(
-    item: &NanoEvent,
-    accounts: Option<&[String]>,
-    hashes: Option<&[String]>,
-) -> bool {
-    if item.event != "nano.confirmation" {
+/// Apply the node's account filter.
+///
+/// The node never broadcasts a legacy block once a filter is given, even when the
+/// block's account matches, so the same rule applies here. A state send matches on
+/// either its owning account or its `link_as_account`, which is where the recipient
+/// lives now that the payload has no derived `destination` field.
+fn event_matches_accounts(item: &NanoEvent, accounts: Option<&[String]>) -> bool {
+    let Some(values) = accounts.filter(|values| !values.is_empty()) else {
         return true;
-    }
-    if accounts.is_some_and(|values| !values.is_empty()) && is_legacy_confirmation(item) {
+    };
+    if is_legacy_confirmation(item) {
         return false;
     }
-    let account_match = accounts.is_none_or(|values| {
-        let source_matches = item
-            .data
-            .get("account")
-            .and_then(Value::as_str)
-            .is_some_and(|account| values.iter().any(|wanted| accounts_equal(wanted, account)));
-        let destination_matches = item
-            .data
-            .get("destination")
-            .and_then(Value::as_str)
-            .is_some_and(|destination| {
-                values
-                    .iter()
-                    .any(|wanted| accounts_equal(wanted, destination))
-            })
-            || item
-                .data
+    let matches = |account: Option<&str>| {
+        account.is_some_and(|account| values.iter().any(|wanted| accounts_equal(wanted, account)))
+    };
+    matches(item.data.get("account").and_then(Value::as_str))
+        || matches(
+            item.data
                 .get("block")
                 .and_then(Value::as_object)
                 .and_then(|block| block.get("link_as_account"))
-                .and_then(Value::as_str)
-                .is_some_and(|destination| {
-                    values
-                        .iter()
-                        .any(|wanted| accounts_equal(wanted, destination))
-                });
-        source_matches || destination_matches
-    });
-    let hash_match = hashes.is_none_or(|values| {
-        item.data
-            .get("hash")
-            .and_then(Value::as_str)
-            .is_some_and(|hash| values.iter().any(|wanted| wanted == hash))
-    });
-    account_match && hash_match
-}
-
-#[cfg(test)]
-fn event_matches_accounts(item: &NanoEvent, accounts: Option<&[String]>) -> bool {
-    event_matches_filters(item, accounts, None)
+                .and_then(Value::as_str),
+        )
 }
 
 async fn sse_handler(
     State(state): State<AppState>,
     axum::extract::Query(query): axum::extract::Query<EventsQuery>,
 ) -> Response {
-    let filters = match query.filters() {
-        Ok(filters) => filters,
+    let accounts = match query.accounts() {
+        Ok(accounts) => accounts,
         Err(message) => {
             state.metrics.errors.fetch_add(1, Ordering::Relaxed);
             return (StatusCode::BAD_REQUEST, Json(json!({"error": message}))).into_response();
         }
     };
     state.metrics.active_streams.fetch_add(1, Ordering::Relaxed);
-    let account_filter_count = filters.accounts.as_ref().map_or(0, Vec::len);
-    let hash_filter_count = filters.hashes.as_ref().map_or(0, Vec::len);
+    let account_filter_count = accounts.as_ref().map_or(0, Vec::len);
     let log_rpc = state.config.log_rpc;
     let started = Instant::now();
     if log_rpc {
@@ -2662,7 +2626,6 @@ async fn sse_handler(
             target: "nano_rpc_gateway::sse",
             event = "sse_session_created",
             account_filter_count,
-            hash_filter_count,
             upstream_ws_circuit = if state.upstream_ready.load(Ordering::Acquire) {
                 "existing"
             } else {
@@ -2679,11 +2642,10 @@ async fn sse_handler(
             log_rpc,
             started,
             account_filter_count,
-            hash_filter_count,
         };
         loop {
             match receiver.recv().await {
-                Ok(item) if event_matches_filters(&item, filters.accounts.as_deref(), filters.hashes.as_deref()) => {
+                Ok(item) if event_matches_accounts(&item, accounts.as_deref()) => {
                     yield Ok::<Event, Infallible>(sse_event(item));
                 }
                 Ok(_) => {}
@@ -3861,32 +3823,56 @@ node_ws_urls:
     }
 
     #[test]
-    fn confirmation_filter_matches_destination_accounts() {
+    fn confirmation_filter_matches_a_state_send_recipient() {
+        // The recipient lives in the block's link_as_account. There is no derived
+        // `destination` field: the node does not send one.
         let item = NanoEvent {
             event: "nano.confirmation".into(),
-            data: json!({"account":"nano_sender", "destination":"nano_player"}),
+            data: json!({"account":"nano_sender", "block":{"type":"state","link_as_account":"nano_player"}}),
         };
         assert!(event_matches_accounts(&item, Some(&["nano_player".into()])));
         assert!(!event_matches_accounts(&item, Some(&["nano_other".into()])));
-
-        let native_item = NanoEvent {
-            event: "nano.confirmation".into(),
-            data: json!({"account":"nano_sender", "block":{"link_as_account":"nano_player"}}),
-        };
-        assert!(event_matches_accounts(
-            &native_item,
-            Some(&["nano_player".into()])
-        ));
+        // The owning account still matches too.
+        assert!(event_matches_accounts(&item, Some(&["nano_sender".into()])));
     }
 
     #[test]
-    fn confirmation_filter_matches_on_hash() {
+    fn confirmation_filter_is_not_applied_without_accounts() {
+        // The node documents one filter for this topic. A block hash filter would be
+        // gateway-only, so an unfiltered subscriber receives every confirmation.
         let item = NanoEvent {
             event: "nano.confirmation".into(),
             data: json!({"account":"nano_a","hash":"ABC"}),
         };
-        assert!(event_matches_filters(&item, None, Some(&["ABC".into()])));
-        assert!(!event_matches_filters(&item, None, Some(&["DEF".into()])));
+        assert!(event_matches_accounts(&item, None));
+    }
+
+    #[test]
+    fn account_filter_ceiling_covers_a_hundred_accounts_and_not_one_more() {
+        // Sized to what an HTTP request line can carry, not to what the node would
+        // accept: nginx and Apache commonly limit a request line to about 8 KiB.
+        let hundred = (0..100)
+            .map(|index| format!("nano_{index:0>60}"))
+            .collect::<Vec<_>>();
+        let encoded = hundred.join(",");
+        assert_eq!(encoded.len(), 66 * 100 - 1);
+        assert!(encoded.len() <= MAX_ACCOUNT_FILTER_BYTES);
+        assert!(hundred.len() <= MAX_ACCOUNT_FILTER_ITEMS);
+        assert!(EventsQuery {
+            accounts: Some(encoded)
+        }
+        .accounts()
+        .is_ok());
+
+        let overflow = (0..=MAX_ACCOUNT_FILTER_ITEMS)
+            .map(|index| format!("nano_{index:0>60}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(EventsQuery {
+            accounts: Some(overflow)
+        }
+        .accounts()
+        .is_err());
     }
 
     #[tokio::test]
