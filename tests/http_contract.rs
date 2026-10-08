@@ -38,7 +38,24 @@ async fn start_native_stub() -> String {
                     "nano_test": {"balance":"0", "receivable":"0"}
                 }}),
                 Some("receivable") => json!({"blocks": []}),
-                Some("account_history") => json!({"account":"nano_test", "history": []}),
+                Some("account_history") if body["reverse"] == true => json!({
+                    "account":"nano_test",
+                    "history": [{"type":"send","account":"nano_test","amount":"1","hash":"H"}],
+                    "next": "N"
+                }),
+                Some("account_history")
+                    if body["count"].as_i64().is_some_and(|count| count < 0) =>
+                {
+                    json!({
+                        "account":"nano_test",
+                        "history": [{"type":"send","account":"nano_test","amount":"1","hash":"H"}]
+                    })
+                }
+                Some("account_history") => json!({
+                    "account":"nano_test",
+                    "history": [{"type":"send","account":"nano_test","amount":"1","hash":"H"}],
+                    "previous": "P"
+                }),
                 Some("block_info") => json!({
                     "block_account":"nano_test", "amount":"0", "balance":"0",
                     "height":"1", "local_timestamp":"0", "confirmed":"true",
@@ -927,9 +944,11 @@ async fn asyncapi_endpoint_documents_receive_only_sse_messages() {
     assert!(document["components"]["messages"]
         .get("nano.confirmation")
         .is_some());
+    // The node closes a WebSocket rather than announcing a gap, so the gateway has
+    // no reset event to publish.
     assert!(document["components"]["messages"]
         .get("nano.stream_reset")
-        .is_some());
+        .is_none());
 }
 
 #[tokio::test]
@@ -1041,17 +1060,21 @@ async fn wildcard_cors_still_preflights_the_declared_methods_and_headers() {
         .expect("allowed headers")
         .to_ascii_lowercase();
     assert!(allowed_headers.contains("content-type"));
-    assert!(allowed_headers.contains("last-event-id"));
+    assert!(allowed_headers.contains("authorization"));
+    // There is no cursor to resume from, so no Last-Event-ID header is accepted.
+    assert!(!allowed_headers.contains("last-event-id"));
 }
 
 #[tokio::test]
-async fn confirmation_stream_emits_reset_for_unknown_generation() {
+async fn confirmation_stream_ignores_a_last_event_id_cursor() {
+    // The node offers no replay, so a cursor cannot resume anything and a subscriber
+    // that expects one must not be given history it cannot reconcile.
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     state
         .events
         .publish(
             "nano.confirmation",
-            json!({"account":"nano_test","hash":"A"}),
+            json!({"account":"nano_test","hash":"OLD"}),
         )
         .await;
     let request = axum::http::Request::builder()
@@ -1065,108 +1088,18 @@ async fn confirmation_stream_emits_reset_for_unknown_generation() {
         .await
         .expect("gateway response");
     let mut body = response.into_body();
-    let frame = body
-        .frame()
-        .await
-        .expect("reset frame")
-        .expect("reset data")
-        .into_data()
-        .expect("reset bytes");
-    let text = String::from_utf8(frame.to_vec()).expect("reset text");
-    assert!(text.contains("event: nano.stream_reset"));
-    assert!(text.contains("\"method\":\"nano.stream_reset\""));
-    assert!(text.contains("\"reason\":\"replay_unavailable\""));
-    assert_eq!(state.metrics.replay_misses.load(Ordering::Relaxed), 1);
-}
-
-#[tokio::test]
-async fn confirmation_stream_fresh_subscribers_filter_live_events_without_replaying_history() {
-    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
-    state
-        .events
-        .publish(
-            "nano.confirmation",
-            json!({"account":"nano_filtered", "hash":"MATCH-REPLAY"}),
-        )
-        .await;
-    state
-        .events
-        .publish(
-            "nano.confirmation",
-            json!({"account":"nano_other", "hash":"MISS-REPLAY"}),
-        )
-        .await;
-
-    let request = axum::http::Request::builder()
-        .method("GET")
-        .uri("/events/confirmations?accounts=xrb_filtered")
-        .body(axum::body::Body::empty())
-        .expect("request");
-    let response = app(state.clone())
-        .oneshot(request)
-        .await
-        .expect("gateway response");
-    let mut body = response.into_body();
-
-    state
-        .events
-        .publish(
-            "nano.confirmation",
-            json!({"account":"nano_other", "hash":"MISS-LIVE"}),
-        )
-        .await;
-    state
-        .events
-        .publish(
-            "nano.confirmation",
-            json!({"account":"nano_filtered", "hash":"MATCH-LIVE"}),
-        )
-        .await;
-    let live = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
-        .await
-        .expect("live timeout")
-        .expect("live frame")
-        .expect("live data")
-        .into_data()
-        .expect("live bytes");
-    let live_text = String::from_utf8(live.to_vec()).expect("live text");
-    assert!(live_text.contains("MATCH-LIVE"));
-    assert!(!live_text.contains("MISS-LIVE"));
-    assert!(!live_text.contains("MATCH-REPLAY"));
-}
-
-#[tokio::test]
-async fn confirmation_stream_fresh_subscriber_does_not_receive_historical_reset() {
-    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
-    state
-        .events
-        .publish(
-            "nano.stream_reset",
-            json!({"reason":"upstream_reconnected", "reconcile":"snapshot"}),
-        )
-        .await;
-    let request = axum::http::Request::builder()
-        .method("GET")
-        .uri("/events/confirmations?accounts=nano_test")
-        .body(axum::body::Body::empty())
-        .expect("request");
-    let response = app(state.clone())
-        .oneshot(request)
-        .await
-        .expect("gateway response");
-    let mut body = response.into_body();
-
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(50), body.frame())
             .await
-            .is_err()
+            .is_err(),
+        "a cursor must not replay retained events"
     );
 
     state
         .events
         .publish(
             "nano.confirmation",
-            json!({"account":"nano_test", "hash":"LIVE"}),
+            json!({"account":"nano_test","hash":"NEW"}),
         )
         .await;
     let live = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
@@ -1177,50 +1110,12 @@ async fn confirmation_stream_fresh_subscriber_does_not_receive_historical_reset(
         .into_data()
         .expect("live bytes");
     let text = String::from_utf8(live.to_vec()).expect("live text");
-    assert!(text.contains("LIVE"));
-    assert!(!text.contains("nano.stream_reset"));
+    assert!(text.contains("NEW"));
+    assert!(!text.contains("OLD"));
 }
 
 #[tokio::test]
-async fn confirmation_stream_replays_events_after_last_event_id() {
-    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
-    let first = state
-        .events
-        .publish("nano.confirmation", json!({"hash": "first"}))
-        .await;
-    let second = state
-        .events
-        .publish("nano.confirmation", json!({"hash": "second"}))
-        .await;
-    let request = axum::http::Request::builder()
-        .method("GET")
-        .uri("/events/confirmations")
-        .header("last-event-id", first.id)
-        .body(axum::body::Body::empty())
-        .expect("request");
-    let response = app(state.clone())
-        .oneshot(request)
-        .await
-        .expect("gateway response");
-    let frame = response
-        .into_body()
-        .frame()
-        .await
-        .expect("replay frame")
-        .expect("replay data")
-        .into_data()
-        .expect("replay bytes");
-    let text = String::from_utf8(frame.to_vec()).expect("replay text");
-    assert!(text.contains("id: "));
-    assert!(text.contains(&second.id));
-    assert!(text.contains("\"hash\":\"second\""));
-    assert!(text.contains("\"jsonrpc\":\"2.0\""));
-    assert!(text.contains("\"method\":\"nano.confirmation\""));
-    assert_eq!(state.metrics.replay_hits.load(Ordering::Relaxed), 1);
-}
-
-#[tokio::test]
-async fn confirmation_stream_emits_reset_after_bounded_receiver_lag() {
+async fn confirmation_stream_carries_the_event_time_and_no_added_fields() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let request = axum::http::Request::builder()
         .method("GET")
@@ -1232,33 +1127,79 @@ async fn confirmation_stream_emits_reset_after_bounded_receiver_lag() {
         .await
         .expect("gateway response");
     let mut body = response.into_body();
+    state
+        .events
+        .publish(
+            "nano.confirmation",
+            json!({
+                "account": "nano_test",
+                "amount": "10000000000000000000000000000000000",
+                "hash": "LIVE",
+                "confirmation_type": "active_quorum",
+                "time": "1756416048136",
+                "block": {"type":"state","subtype":"send","link_as_account":"nano_recipient"}
+            }),
+        )
+        .await;
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
+        .await
+        .expect("frame timeout")
+        .expect("frame")
+        .expect("data")
+        .into_data()
+        .expect("bytes");
+    let text = String::from_utf8(frame.to_vec()).expect("text");
+    assert!(text.contains("event: nano.confirmation"));
+    assert!(text.contains("\"time\":\"1756416048136\""));
+    assert!(text.contains("\"confirmation_type\":\"active_quorum\""));
+    // The node sends no profile, destination or top-level subtype, so neither does
+    // the gateway. The subtype stays inside the block where the node puts it.
+    assert!(!text.contains("\"profile\""));
+    assert!(!text.contains("\"destination\""));
+    assert!(!text.contains("event: nano.stream_reset"));
+}
 
-    for index in 0..(256 + 8) {
+#[tokio::test]
+async fn confirmation_stream_closes_when_the_subscriber_falls_behind() {
+    // There is no replay to fall back on, so an overflow closes the stream. The
+    // client reconnects and reconciles with accounts_frontiers and account_history.
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/events/confirmations")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state.clone())
+        .oneshot(request)
+        .await
+        .expect("gateway response");
+    let mut body = response.into_body();
+    for index in 0..(256 + 16) {
         state
             .events
             .publish(
                 "nano.confirmation",
-                json!({"hash": format!("hash-{index}")}),
+                json!({"account":"nano_test","hash": format!("hash-{index}")}),
             )
             .await;
     }
-
-    let mut saw_reset = false;
-    for _ in 0..(256 + 16) {
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
-            .await
-            .expect("SSE frame timeout")
-            .expect("SSE frame")
-            .expect("SSE data")
-            .into_data()
-            .expect("SSE bytes");
-        if String::from_utf8_lossy(&frame).contains("event: nano.stream_reset") {
-            saw_reset = true;
+    let mut closed = false;
+    for _ in 0..(256 + 32) {
+        let frame = tokio::time::timeout(std::time::Duration::from_millis(500), body.frame()).await;
+        let Ok(Some(Ok(frame))) = frame else {
+            closed = true;
+            break;
+        };
+        let bytes = frame.into_data().expect("bytes").to_vec();
+        let text = String::from_utf8_lossy(&bytes);
+        if text.contains("event: nano.stream_reset") {
             break;
         }
     }
-    assert!(saw_reset, "bounded receiver lag must produce a reset frame");
-    assert_eq!(state.metrics.overflow_resets.load(Ordering::Relaxed), 1);
+    assert!(
+        closed,
+        "an overflowing subscriber must be closed, not reset"
+    );
 }
 
 #[tokio::test]
@@ -1353,9 +1294,12 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
             .send(tokio_tungstenite::tungstenite::Message::Text(
                 json!({
                     "topic":"confirmation",
+                    "time":"1564935350664",
                     "message":{
                         "account":"nano_sender",
+                        "amount":"10000000000000000000000000000000000",
                         "hash":"FLOW-HASH",
+                        "confirmation_type":"active_quorum",
                         "block":{
                             "type":"state",
                             "subtype":"send",
@@ -1514,17 +1458,19 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
             .expect("SSE chunk result")
             .expect("SSE chunk");
         transcript.push_str(std::str::from_utf8(&chunk).expect("SSE UTF-8"));
-        if transcript.contains("event: nano.confirmation")
-            && transcript.contains("event: nano.stream_reset")
-        {
+        if transcript.contains("event: nano.confirmation") {
             break;
         }
     }
     assert!(transcript.contains("event: nano.confirmation"));
     assert!(transcript.contains("FLOW-HASH"));
     assert!(transcript.contains("nano_recipient"));
+    // The envelope time is carried through, and nothing is added that the node
+    // did not send.
+    assert!(transcript.contains("\"time\":\"1564935350664\""));
     assert!(transcript.contains("\"subtype\":\"send\""));
-    assert!(transcript.contains("event: nano.stream_reset"));
+    assert!(!transcript.contains("\"profile\""));
+    assert!(!transcript.contains("\"destination\""));
 
     let refreshed: Value = client
         .post(format!("{base}/rpc"))
@@ -1546,27 +1492,15 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
         refreshed["result"]["balances"]["nano_recipient"]["receivable"],
         "3"
     );
-    let confirmation_id = transcript
-        .split("\n\n")
-        .find(|frame| frame.contains("event: nano.confirmation"))
-        .and_then(|frame| frame.lines().find(|line| line.starts_with("id: ")))
-        .and_then(|line| line.strip_prefix("id: "))
-        .expect("confirmation cursor");
-
-    let mut replay = client
-        .get(format!("{base}/events/confirmations"))
-        .header("last-event-id", confirmation_id)
-        .send()
-        .await
-        .expect("replay connect");
-    let replay_chunk = tokio::time::timeout(std::time::Duration::from_secs(2), replay.chunk())
-        .await
-        .expect("replay timeout")
-        .expect("replay chunk result")
-        .expect("replay chunk");
-    assert!(std::str::from_utf8(&replay_chunk)
-        .expect("replay UTF-8")
-        .contains("event: nano.stream_reset"));
+    // When the upstream WebSocket closes, the client stream closes with it, as a
+    // node closing a WebSocket would. Nothing is announced, so a client reconciles
+    // with accounts_frontiers and account_history rather than waiting for a signal.
+    let closed =
+        tokio::time::timeout(std::time::Duration::from_secs(10), sse_response.chunk()).await;
+    assert!(
+        closed.is_err() || closed.as_ref().expect("chunk").is_err(),
+        "the client stream must close when the upstream WebSocket closes"
+    );
 
     assert!(bridge.await.expect("bridge task").is_ok());
     ws_task.await.expect("ws task");
@@ -1986,4 +1920,43 @@ async fn account_history_paginates_with_head_and_reports_previous() {
     assert!(response["error"].is_null(), "{response}");
     assert_eq!(response["result"]["account"], "nano_test");
     assert!(response["result"]["history"].is_array());
+}
+
+#[tokio::test]
+async fn account_history_reports_previous_when_truncated_and_next_when_reversed() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+
+    // Forward: `previous` is the hash to pass as the next `head`.
+    let forward = rpc(
+        state.clone(),
+        r#"{"jsonrpc":"2.0","method":"account_history","params":{"account":"nano_test","count":1},"id":1}"#,
+    )
+    .await;
+    assert!(forward["error"].is_null(), "{forward}");
+    assert_eq!(forward["result"]["previous"], "P");
+    assert!(forward["result"].get("next").is_none());
+
+    // Reversed: `next` replaces `previous`.
+    let reversed = rpc(
+        state,
+        r#"{"jsonrpc":"2.0","method":"account_history","params":{"account":"nano_test","head":"H","reverse":true},"id":2}"#,
+    )
+    .await;
+    assert!(reversed["error"].is_null(), "{reversed}");
+    assert_eq!(reversed["result"]["next"], "N");
+    assert!(reversed["result"].get("previous").is_none());
+}
+
+#[tokio::test]
+async fn account_history_with_count_minus_one_returns_the_whole_chain() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let response = rpc(
+        state,
+        r#"{"jsonrpc":"2.0","method":"account_history","params":{"account":"nano_test","count":-1},"id":1}"#,
+    )
+    .await;
+    assert!(response["error"].is_null(), "{response}");
+    assert_eq!(response["result"]["history"][0]["hash"], "H");
+    // No truncation, so no `previous`.
+    assert!(response["result"].get("previous").is_none());
 }

@@ -15,7 +15,7 @@ use async_stream::stream;
 use axum::{
     body::Bytes,
     extract::State,
-    http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -635,19 +635,12 @@ struct EventSpec {
     params_schema: &'static str,
 }
 
-fn event_registry() -> [EventSpec; 2] {
-    [
-        EventSpec {
-            name: "nano.confirmation",
-            summary: "A block from the configured Nano profile has been cemented.",
-            params_schema: "ConfirmationParams",
-        },
-        EventSpec {
-            name: "nano.stream_reset",
-            summary: "The stream lost continuity. Reconcile before processing more events.",
-            params_schema: "StreamResetParams",
-        },
-    ]
+fn event_registry() -> [EventSpec; 1] {
+    [EventSpec {
+        name: "nano.confirmation",
+        summary: "A block from the configured Nano profile has been cemented.",
+        params_schema: "ConfirmationParams",
+    }]
 }
 
 /// Build the receive-only AsyncAPI contract for confirmation SSE consumers.
@@ -674,7 +667,7 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
                     "summary": event.summary,
                     "contentType": "application/json",
                     "payload": notification_schema(event.name, event.params_schema),
-                    "examples": [{"payload": notification_example(event.name, profile)}]
+                    "examples": [{"payload": notification_example(event.name)}]
                 }),
             )
         })
@@ -684,7 +677,7 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
         "info": {
             "title": "Nano Gateway Events",
             "version": "0.1.0",
-            "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if a reset occurs or confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state."
+            "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state."
         },
         "defaultContentType": "application/json",
         "servers": {"gateway": {"host": host, "protocol": protocol, "pathname": "/events/confirmations"}},
@@ -692,11 +685,10 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
             "confirmations": {
                 "address": "/events/confirmations",
                 "title": "Confirmation event stream",
-                "description": "Bounded process-local replay. Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose destination is a tracked account. For a send, params.hash equals the process result hash. Send Last-Event-ID to resume; deduplicate by hash. nano.stream_reset reports that replay or live continuity is unavailable; call block_info with each tracked hash and inspect result.confirmed.",
+                "description": "Establish this stream before calling process. The accounts filter matches a confirmed block owned by a tracked account (including sends and receives), and a state send whose link_as_account is a tracked account. For a send, params.hash equals the process result hash. Deduplicate by hash. When the upstream WebSocket drops the stream closes, as a node closing a WebSocket would; there is no replay and no gap announcement, so reconcile with accounts_frontiers and account_history before applying later events.",
                 "servers": [{"$ref": "#/servers/gateway"}],
                 "messages": {
-                    "nanoConfirmation": {"$ref": "#/components/messages/nano.confirmation"},
-                    "nanoStreamReset": {"$ref": "#/components/messages/nano.stream_reset"}
+                    "nanoConfirmation": {"$ref": "#/components/messages/nano.confirmation"}
                 },
                 "bindings": {"http": {"bindingVersion": "0.3.0"}}
             }
@@ -720,7 +712,8 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
             "messages": messages,
             "schemas": {
                 "ConfirmationParams": confirmation_params_schema(),
-                "StreamResetParams": stream_reset_params_schema()
+                "ConfirmationSubscribeOptions": confirmation_subscribe_options(),
+                "ConfirmationUpdateOptions": confirmation_update_options()
             }
         },
         "x-nano-profile": profile,
@@ -781,7 +774,7 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
         },
         "x-http-response": {
             "contentType": "text/event-stream",
-            "headers": {"Last-Event-ID": {"type": "string", "description": "Resume after this SSE event cursor."}}
+            "headers": {}
         }
     })
 }
@@ -799,55 +792,81 @@ fn notification_schema(method: &str, params_schema: &str) -> Value {
 
 fn confirmation_params_schema() -> Value {
     json!({
-        "type": "object", "required": ["profile", "hash"],
+        "type": "object",
+        "required": ["account", "amount", "hash", "confirmation_type"],
         "properties": {
-            "profile": {"type": "string"},
+            "time": {"type": "string", "description": "Event time in milliseconds since the epoch, from the upstream envelope."},
             "hash": {"type": "string", "description": "Cemented block hash. For a submitted block, this equals process result.hash and is the idempotency key."},
             "account": {"type": "string", "description": "Confirmed block account."},
-            "destination": {"type": "string", "description": "Recipient of a state send when present; an accounts-filtered subscriber receives matching destination events."},
-            "subtype": {"type": "string", "description": "Native state block subtype, such as send or receive, when supplied by the upstream node."},
-            "amount": {"type": "string"}, "confirmation_type": {"type": "string"},
-            "block": {"type": "object", "description": "Native confirmed block content when supplied by the upstream node.", "additionalProperties": true},
-            "election_info": {"type": "object", "additionalProperties": true}
-        }, "additionalProperties": true
+            "amount": {"type": "string", "description": "Block amount in raw."},
+            "confirmation_type": {"type": "string", "enum": ["active_quorum", "active_confirmation_height", "inactive"], "description": "How the block was confirmed."},
+            "block": {"type": "object", "description": "Native confirmed block content. `subtype` and `link_as_account` live here; the node keeps them inside the block.", "additionalProperties": true},
+            "election_info": {
+                "type": "object",
+                "description": "Present when the subscription requested include_election_info.",
+                "properties": {
+                    "duration": {"type": "string", "description": "Election duration in milliseconds."},
+                    "time": {"type": "string", "description": "End of the election, in milliseconds since the epoch."},
+                    "tally": {"type": "string", "description": "Weight tally in raw."},
+                    "request_count": {"type": "string"},
+                    "blocks": {"type": "string"},
+                    "voters": {"type": "string"}
+                },
+                "additionalProperties": true
+            }
+        },
+        "additionalProperties": true
     })
 }
 
-fn stream_reset_params_schema() -> Value {
+/// The subscribe options the node documents for the confirmation topic.
+///
+/// They map to connect-time parameters on the subscription, so a caller chooses
+/// them when it subscribes rather than per event.
+fn confirmation_subscribe_options() -> Value {
     json!({
-        "type": "object", "additionalProperties": false,
-        "required": ["reason", "profile", "reconcile"],
+        "type": "object",
         "properties": {
-            "reason": {"type": "string", "enum": ["upstream_connected", "upstream_reconnected", "upstream_disconnected", "upstream_closed", "replay_unavailable", "subscriber_lagged"]},
-            "profile": {"type": "string"}, "reconcile": {"type": "string"}
-        }
+            "confirmation_type": {"type": "string", "enum": ["all", "active", "inactive", "active_quorum", "active_confirmation_height"], "default": "all", "description": "Which confirmations to receive. The upstream guide recommends leaving this unset so a notification is less likely to be missed."},
+            "accounts": {"type": "array", "items": {"type": "string"}, "description": "Only receive confirmations that mention these accounts. Legacy blocks are never broadcast when a filter is given."},
+            "all_local_accounts": {"type": "boolean", "description": "Receive confirmations that mention any account in a node wallet."},
+            "include_block": {"type": "boolean", "default": true, "description": "Include the block content. Incompatible with account filtering."},
+            "include_election_info": {"type": "boolean", "default": false, "description": "Add election_info to each confirmation."},
+            "include_sideband_info": {"type": "boolean", "default": false, "description": "Add height and local_timestamp to the block."}
+        },
+        "additionalProperties": false
     })
 }
 
-fn notification_example(method: &str, profile: &str) -> Value {
-    match method {
-        "nano.confirmation" => notification(
-            method,
-            json!({
-                "profile": profile,
-                "hash": "ABC123",
-                "account": "nano_sender...",
-                "destination": "nano_new_account...",
-                "subtype": "send",
-                "confirmation_type": "active_quorum",
-                "block": {"type": "state", "subtype": "send", "link_as_account": "nano_new_account..."}
-            }),
-        ),
-        _ => notification(method, reset_params("replay_unavailable", profile)),
-    }
+/// The runtime filter-update options the node documents (V21+).
+fn confirmation_update_options() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "accounts_add": {"type": "array", "items": {"type": "string"}, "description": "Start receiving confirmations that mention these accounts."},
+            "accounts_del": {"type": "array", "items": {"type": "string"}, "description": "Stop receiving confirmations that mention these accounts."}
+        },
+        "additionalProperties": false
+    })
+}
+
+fn notification_example(method: &str) -> Value {
+    // The registry holds exactly one event, so the example is that event.
+    notification(
+        method,
+        json!({
+            "time": "1564935350664",
+            "hash": "ABC123",
+            "account": "nano_sender...",
+            "amount": "10000000000000000000000000000000000",
+            "confirmation_type": "active_quorum",
+            "block": {"type": "state", "subtype": "send", "link_as_account": "nano_new_account..."}
+        }),
+    )
 }
 
 fn notification(method: &str, params: Value) -> Value {
     json!({"jsonrpc": "2.0", "method": method, "params": params})
-}
-
-fn reset_params(reason: &str, profile: &str) -> Value {
-    json!({"reason": reason, "profile": profile, "reconcile": "Query authoritative Nano RPC state before applying new confirmations"})
 }
 
 /// The component schemas for the pinned profile.
@@ -1602,103 +1621,46 @@ fn websocket_connect_request(endpoint: &str) -> Result<TungsteniteRequest<()>, G
 }
 
 #[derive(Clone)]
+/// Fan-out for live confirmation events.
+///
+/// The node offers no replay: a WebSocket that drops is simply closed. So there is
+/// no buffer to retain, no cursor to resume from and no gap to announce. A subscriber
+/// that falls behind is closed rather than told about it, and it reconciles with
+/// accounts_frontiers and account_history when it reconnects.
 pub struct EventHub {
-    generation: String,
-    next: Arc<Mutex<u64>>,
-    history: Arc<Mutex<VecDeque<NanoEvent>>>,
     tx: broadcast::Sender<NanoEvent>,
-    capacity: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NanoEvent {
-    pub id: String,
     pub event: String,
     pub data: Value,
 }
 
+impl Default for EventHub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventHub {
-    pub fn new(capacity: usize) -> Self {
-        static GENERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
-        let counter = GENERATION_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
+    pub fn new() -> Self {
+        Self::with_capacity(256)
+    }
+    /// A subscriber that falls this far behind is closed rather than told about it.
+    pub fn with_capacity(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity.max(1));
-        Self {
-            generation: format!("{timestamp:x}-{counter:x}"),
-            next: Arc::new(Mutex::new(0)),
-            history: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),
-            tx,
-            capacity: capacity.max(1),
-        }
+        Self { tx }
     }
     pub async fn publish(&self, event: impl Into<String>, data: Value) -> NanoEvent {
-        let mut history = self.history.lock().await;
         let event = event.into();
-        if let Some(existing) = history.iter().find(|item| {
-            item.event == event
-                && item.data.get("hash").and_then(Value::as_str)
-                    == data.get("hash").and_then(Value::as_str)
-                && item.data.get("account").and_then(Value::as_str)
-                    == data.get("account").and_then(Value::as_str)
-                && item.data.get("hash").is_some()
-        }) {
-            return existing.clone();
-        }
-        let mut next = self.next.lock().await;
-        *next += 1;
-        let item = NanoEvent {
-            id: format!("{}:{next}", self.generation),
-            event,
-            data,
-        };
-        history.push_back(item.clone());
-        while history.len() > self.capacity {
-            history.pop_front();
-        }
+        let item = NanoEvent { event, data };
         let _ = self.tx.send(item.clone());
         item
-    }
-    async fn replay(&self, cursor: Option<&str>) -> (bool, Vec<NanoEvent>) {
-        let history = self.history.lock().await;
-        let parsed = cursor.and_then(parse_event_cursor);
-        let same_generation = parsed
-            .as_ref()
-            .is_some_and(|(generation, _)| generation == &self.generation);
-        let oldest = history
-            .front()
-            .and_then(|item| parse_event_cursor(&item.id));
-        let reset = cursor.is_some()
-            && (!same_generation
-                || parsed.as_ref().is_none_or(|(_, requested)| {
-                    oldest
-                        .as_ref()
-                        .is_some_and(|(_, oldest)| *requested < oldest.saturating_sub(1))
-                }));
-        let sequence = parsed
-            .filter(|(generation, _)| generation == &self.generation)
-            .map(|(_, sequence)| sequence);
-        let events = history
-            .iter()
-            .filter(|item| {
-                sequence.is_none_or(|cursor| {
-                    parse_event_cursor(&item.id).is_some_and(|(_, sequence)| sequence > cursor)
-                })
-            })
-            .cloned()
-            .collect();
-        (reset, events)
     }
     fn subscribe(&self) -> broadcast::Receiver<NanoEvent> {
         self.tx.subscribe()
     }
-}
-
-fn parse_event_cursor(value: &str) -> Option<(String, u64)> {
-    let (generation, sequence) = value.split_once(':')?;
-    Some((generation.to_owned(), sequence.parse().ok()?))
 }
 
 /// Operator guards for methods whose cost falls outside a normal read.
@@ -1851,9 +1813,6 @@ pub struct Metrics {
     pub requests: Arc<AtomicU64>,
     pub errors: Arc<AtomicU64>,
     pub active_streams: Arc<AtomicU64>,
-    pub replay_resets: Arc<AtomicU64>,
-    pub replay_hits: Arc<AtomicU64>,
-    pub replay_misses: Arc<AtomicU64>,
     pub overflow_resets: Arc<AtomicU64>,
     pub upstream_reconnects: Arc<AtomicU64>,
     pub request_duration_ms_sum: Arc<AtomicU64>,
@@ -1912,16 +1871,7 @@ fn log_rpc_request(method: &str) {
 fn sse_event(item: NanoEvent) -> Event {
     let data = serde_json::to_string(&notification(&item.event, item.data))
         .unwrap_or_else(|_| "null".into());
-    Event::default().id(item.id).event(item.event).data(data)
-}
-
-fn reset_sse_event(reason: &str, profile: &str) -> Event {
-    let data = serde_json::to_string(&notification(
-        "nano.stream_reset",
-        reset_params(reason, profile),
-    ))
-    .unwrap_or_else(|_| "null".into());
-    Event::default().event("nano.stream_reset").data(data)
+    Event::default().event(item.event).data(data)
 }
 
 impl AppState {
@@ -1955,7 +1905,7 @@ impl AppState {
             .transpose()?;
         Ok(Self {
             native: NativeRouter::with_response_logging(&config.node_rpc_urls, config.log_rpc)?,
-            events: EventHub::new(EVENT_HISTORY_CAPACITY),
+            events: EventHub::new(),
             metrics: Metrics::default(),
             ws_active: Arc::new(AtomicUsize::new(0)),
             ws_unhealthy_until: Arc::new(Mutex::new(vec![
@@ -2415,11 +2365,7 @@ pub fn app(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(allow_origin)
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([
-            header::AUTHORIZATION,
-            header::CONTENT_TYPE,
-            HeaderName::from_static("last-event-id"),
-        ]);
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     Router::new()
         .route("/rpc", post(rpc_handler))
         .route("/openrpc.json", get(openrpc_handler))
@@ -2457,17 +2403,13 @@ async fn metrics_handler(
         format!(
             "nano_gateway_up 1\nnano_gateway_upstream_ready {ready}\n\
 nano_gateway_requests_total {}\nnano_gateway_errors_total {}\n\
-nano_gateway_active_streams {}\nnano_gateway_replay_resets_total {}\n\
-nano_gateway_replay_hits_total {}\nnano_gateway_replay_misses_total {}\n\
+nano_gateway_active_streams {}\n\
 nano_gateway_overflow_resets_total {}\nnano_gateway_upstream_reconnects_total {}\n\
 nano_gateway_sse_queue_capacity {}\n\
 nano_gateway_request_duration_ms_sum {}\nnano_gateway_request_duration_ms_count {}\n",
             state.metrics.requests.load(Ordering::Relaxed),
             state.metrics.errors.load(Ordering::Relaxed),
             state.metrics.active_streams.load(Ordering::Relaxed),
-            state.metrics.replay_resets.load(Ordering::Relaxed),
-            state.metrics.replay_hits.load(Ordering::Relaxed),
-            state.metrics.replay_misses.load(Ordering::Relaxed),
             state.metrics.overflow_resets.load(Ordering::Relaxed),
             state.metrics.upstream_reconnects.load(Ordering::Relaxed),
             EVENT_HISTORY_CAPACITY,
@@ -2701,7 +2643,6 @@ fn event_matches_accounts(item: &NanoEvent, accounts: Option<&[String]>) -> bool
 
 async fn sse_handler(
     State(state): State<AppState>,
-    headers: HeaderMap,
     axum::extract::Query(query): axum::extract::Query<EventsQuery>,
 ) -> Response {
     let filters = match query.filters() {
@@ -2711,28 +2652,7 @@ async fn sse_handler(
             return (StatusCode::BAD_REQUEST, Json(json!({"error": message}))).into_response();
         }
     };
-    let cursor = headers
-        .get("last-event-id")
-        .and_then(|value| value.to_str().ok());
-    // A fresh subscriber needs a live circuit, not this process's old control
-    // events. Replay is exclusively a cursor-resumption feature; otherwise a
-    // historical nano.stream_reset would make compliant clients immediately
-    // tear down and reopen the newly established stream.
-    let (reset, replay) = match cursor {
-        Some(cursor) => state.events.replay(Some(cursor)).await,
-        None => (false, Vec::new()),
-    };
-    if cursor.is_some() {
-        if reset {
-            state.metrics.replay_misses.fetch_add(1, Ordering::Relaxed);
-        } else {
-            state.metrics.replay_hits.fetch_add(1, Ordering::Relaxed);
-        }
-    }
     state.metrics.active_streams.fetch_add(1, Ordering::Relaxed);
-    if reset {
-        state.metrics.replay_resets.fetch_add(1, Ordering::Relaxed);
-    }
     let account_filter_count = filters.accounts.as_ref().map_or(0, Vec::len);
     let hash_filter_count = filters.hashes.as_ref().map_or(0, Vec::len);
     let log_rpc = state.config.log_rpc;
@@ -2743,9 +2663,6 @@ async fn sse_handler(
             event = "sse_session_created",
             account_filter_count,
             hash_filter_count,
-            last_event_id_present = cursor.is_some(),
-            replay_reset = reset,
-            replay_event_count = replay.len(),
             upstream_ws_circuit = if state.upstream_ready.load(Ordering::Acquire) {
                 "existing"
             } else {
@@ -2756,7 +2673,6 @@ async fn sse_handler(
     }
     let mut receiver = state.events.subscribe();
     let active_streams = state.metrics.active_streams.clone();
-    let replay_resets = state.metrics.replay_resets.clone();
     let output = stream! {
         let _guard = ActiveStreamGuard {
             active_streams,
@@ -2765,25 +2681,15 @@ async fn sse_handler(
             account_filter_count,
             hash_filter_count,
         };
-        if reset {
-            yield Ok::<Event, Infallible>(reset_sse_event("replay_unavailable", &state.config.profile));
-        }
-        for item in replay {
-            if event_matches_filters(&item, filters.accounts.as_deref(), filters.hashes.as_deref()) {
-                yield Ok::<Event, Infallible>(sse_event(item));
-            }
-        }
         loop {
             match receiver.recv().await {
                 Ok(item) if event_matches_filters(&item, filters.accounts.as_deref(), filters.hashes.as_deref()) => {
                     yield Ok::<Event, Infallible>(sse_event(item));
                 }
                 Ok(_) => {}
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    replay_resets.fetch_add(1, Ordering::Relaxed);
-                    state.metrics.overflow_resets.fetch_add(1, Ordering::Relaxed);
-                    yield Ok::<Event, Infallible>(reset_sse_event("subscriber_lagged", &state.config.profile));
-                }
+                // A subscriber that cannot keep up is closed, not told about it.
+                // The node offers no replay, so there is nothing to catch up with.
+                Err(broadcast::error::RecvError::Lagged(_)) => break,
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         }
@@ -2913,17 +2819,7 @@ async fn run_ws_bridge_with_confirmation_liveness(
             );
         }
         state.upstream_ready.store(true, Ordering::Relaxed);
-        state
-            .events
-            .publish(
-                "nano.stream_reset",
-                json!({
-                    "reason": if reconnecting { "upstream_reconnected" } else { "upstream_connected" },
-                    "profile": state.config.profile,
-                    "reconcile": "Query accounts_balances for tracked accounts, or account_info for one account, before applying new confirmations"
-                }),
-            )
-            .await;
+
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
         heartbeat.tick().await;
         let mut awaiting_pong = false;
@@ -2964,7 +2860,7 @@ async fn run_ws_bridge_with_confirmation_liveness(
                 _ => continue,
             };
             if let Ok(value) = value {
-                if let Some(event) = normalize_confirmation(&value, &state.config.profile) {
+                if let Some(event) = normalize_confirmation(&value) {
                     confirmation_deadline
                         .as_mut()
                         .reset(tokio::time::Instant::now() + confirmation_liveness);
@@ -2982,34 +2878,28 @@ async fn run_ws_bridge_with_confirmation_liveness(
     if let (Err(error), Some(url)) = (&result, &selected_ws_url) {
         log_upstream_error("websocket", url, &error.to_string());
     }
-    if connected {
-        if result.is_ok() {
-            if let Some(ws_url) = selected_ws_url.as_deref() {
-                tracing::warn!(
-                    target: "nano_rpc_gateway::upstream",
-                    event = "upstream_closed",
-                    protocol = "websocket",
-                    upstream_url = %redact_upstream_url(ws_url),
-                    "websocket upstream closed"
-                );
-            }
+    if connected && result.is_ok() {
+        if let Some(ws_url) = selected_ws_url.as_deref() {
+            tracing::warn!(
+                target: "nano_rpc_gateway::upstream",
+                event = "upstream_closed",
+                protocol = "websocket",
+                upstream_url = %redact_upstream_url(ws_url),
+                "websocket upstream closed"
+            );
         }
-        state
-            .events
-            .publish(
-                "nano.stream_reset",
-                json!({
-                    "reason": if result.is_err() { "upstream_disconnected" } else { "upstream_closed" },
-                    "profile": state.config.profile,
-                    "reconcile": "Query accounts_balances for tracked accounts, or account_info for one account, before applying new confirmations"
-                }),
-            )
-            .await;
     }
     result
 }
 
-fn normalize_confirmation(value: &Value, profile: &str) -> Option<Value> {
+/// Extract a confirmation message from an upstream WebSocket frame.
+///
+/// Translation-layer item 3: the payload carries every upstream field unchanged,
+/// including `time`. The envelope's `topic` becomes the SSE event name, so it is
+/// not duplicated into the payload. Nothing is added: `profile`, `destination`
+/// and a top-level `subtype` are all derivable from the block the node already
+/// sends, and the node has no such fields.
+fn normalize_confirmation(value: &Value) -> Option<Value> {
     if value.get("ack").is_some()
         || value.get("topic").and_then(Value::as_str) != Some("confirmation")
     {
@@ -3020,28 +2910,9 @@ fn normalize_confirmation(value: &Value, profile: &str) -> Option<Value> {
         .cloned()
         .unwrap_or_else(|| value.clone());
     if let Value::Object(fields) = &mut data {
-        if !fields.contains_key("destination") {
-            let destination = fields
-                .get("block")
-                .and_then(Value::as_object)
-                .and_then(|block| block.get("link_as_account"))
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if let Some(destination) = destination {
-                fields.insert("destination".into(), Value::String(destination));
-            }
+        if let Some(time) = value.get("time").cloned() {
+            fields.insert("time".into(), time);
         }
-        if !fields.contains_key("subtype") {
-            let subtype = fields
-                .get("block")
-                .and_then(Value::as_object)
-                .and_then(|block| block.get("subtype"))
-                .cloned();
-            if let Some(subtype) = subtype {
-                fields.insert("subtype".into(), subtype);
-            }
-        }
-        fields.insert("profile".into(), Value::String(profile.into()));
     }
     Some(data)
 }
@@ -3202,19 +3073,19 @@ mod tests {
     }
 
     #[test]
-    fn asyncapi_reset_schema_lists_every_runtime_reason() {
+    fn asyncapi_advertises_only_the_confirmation_event() {
+        // The node closes a WebSocket rather than announcing a gap, so there is no
+        // reset event and no reason enum.
         let document = asyncapi_document("nano-node/V28.2", "https://gateway.invalid/rpc");
-        assert_eq!(
-            document["components"]["schemas"]["StreamResetParams"]["properties"]["reason"]["enum"],
-            json!([
-                "upstream_connected",
-                "upstream_reconnected",
-                "upstream_disconnected",
-                "upstream_closed",
-                "replay_unavailable",
-                "subscriber_lagged"
-            ])
-        );
+        let schemas = document["components"]["schemas"]
+            .as_object()
+            .expect("AsyncAPI schemas");
+        assert!(schemas.contains_key("ConfirmationParams"));
+        assert!(!schemas.contains_key("StreamResetParams"));
+        assert!(!document["channels"]["confirmations"]["description"]
+            .as_str()
+            .expect("description")
+            .contains("Last-Event-ID"));
     }
 
     #[test]
@@ -3288,7 +3159,7 @@ mod tests {
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(messages, vec!["nano.confirmation", "nano.stream_reset"]);
+        assert_eq!(messages, vec!["nano.confirmation"]);
     }
     #[test]
     fn openrpc_methods_have_callable_shapes() {
@@ -3908,24 +3779,37 @@ node_ws_urls:
             "../fixtures/native/v28.2/confirmation.live.json"
         ))
         .expect("confirmation response");
-        assert_eq!(confirmation["profile"], "nano-node/V28.2");
-        assert!(confirmation["hash"].as_str().is_some());
+        // The recorded frame is the node's own envelope, topic and time included.
+        assert_eq!(confirmation["topic"], "confirmation");
+        assert!(confirmation["time"].as_str().is_some());
+        assert!(confirmation["message"]["hash"].as_str().is_some());
+        assert!(confirmation["message"]["confirmation_type"]
+            .as_str()
+            .is_some());
+        let event = normalize_confirmation(&confirmation).expect("confirmation event");
+        assert_eq!(event["hash"], confirmation["message"]["hash"]);
+        assert_eq!(event["time"], confirmation["time"]);
         let disconnect: Value = serde_json::from_str(include_str!(
             "../fixtures/native/v28.2/confirmation.disconnect.live.json"
         ))
         .expect("disconnect response");
-        assert_eq!(disconnect["data"]["reason"], "upstream_disconnect");
+        assert_eq!(disconnect["event"], "confirmation");
     }
     #[test]
-    fn confirmation_normalization_filters_acks_and_adds_profile() {
-        assert!(normalize_confirmation(&json!({"ack":"subscribe"}), "nano-node/V28.2").is_none());
-        let event = normalize_confirmation(
-            &json!({"topic":"confirmation","message":{"hash":"A"}}),
-            "nano-node/V28.2",
-        )
+    fn confirmation_normalization_filters_acks_and_carries_the_event_time() {
+        assert!(normalize_confirmation(&json!({"ack":"subscribe"})).is_none());
+        let event = normalize_confirmation(&json!({
+            "topic":"confirmation",
+            "time":"1564935350664",
+            "message":{"hash":"A"}
+        }))
         .expect("confirmation event");
         assert_eq!(event["hash"], "A");
-        assert_eq!(event["profile"], "nano-node/V28.2");
+        assert_eq!(event["time"], "1564935350664");
+        // Nothing is added that the node did not send.
+        assert!(event.get("profile").is_none());
+        assert!(event.get("destination").is_none());
+        assert!(event.get("subtype").is_none());
     }
 
     #[test]
@@ -3942,7 +3826,6 @@ node_ws_urls:
     #[test]
     fn confirmation_filter_matches_only_requested_accounts() {
         let item = NanoEvent {
-            id: "1".into(),
             event: "nano.confirmation".into(),
             data: json!({"account":"nano_a"}),
         };
@@ -3954,7 +3837,6 @@ node_ws_urls:
     #[test]
     fn confirmation_filter_treats_nano_and_xrb_prefixes_as_equivalent() {
         let item = NanoEvent {
-            id: "1".into(),
             event: "nano.confirmation".into(),
             data: json!({"account":"nano_3example"}),
         };
@@ -3971,7 +3853,6 @@ node_ws_urls:
     #[test]
     fn confirmation_filter_excludes_legacy_blocks_when_accounts_are_given() {
         let item = NanoEvent {
-            id: "1".into(),
             event: "nano.confirmation".into(),
             data: json!({"account":"nano_a", "block":{"type":"open"}}),
         };
@@ -3982,7 +3863,6 @@ node_ws_urls:
     #[test]
     fn confirmation_filter_matches_destination_accounts() {
         let item = NanoEvent {
-            id: "1".into(),
             event: "nano.confirmation".into(),
             data: json!({"account":"nano_sender", "destination":"nano_player"}),
         };
@@ -3990,7 +3870,6 @@ node_ws_urls:
         assert!(!event_matches_accounts(&item, Some(&["nano_other".into()])));
 
         let native_item = NanoEvent {
-            id: "2".into(),
             event: "nano.confirmation".into(),
             data: json!({"account":"nano_sender", "block":{"link_as_account":"nano_player"}}),
         };
@@ -4001,97 +3880,50 @@ node_ws_urls:
     }
 
     #[test]
-    fn confirmation_filter_supports_hashes_and_keeps_control_events_visible() {
+    fn confirmation_filter_matches_on_hash() {
         let item = NanoEvent {
-            id: "1".into(),
             event: "nano.confirmation".into(),
             data: json!({"account":"nano_a","hash":"ABC"}),
         };
         assert!(event_matches_filters(&item, None, Some(&["ABC".into()])));
         assert!(!event_matches_filters(&item, None, Some(&["DEF".into()])));
-        let reset = NanoEvent {
-            id: "2".into(),
-            event: "nano.stream_reset".into(),
-            data: json!({}),
-        };
-        assert!(event_matches_filters(&reset, None, Some(&["DEF".into()])));
     }
+
     #[tokio::test]
-    async fn event_hub_reports_reset_after_bounded_history_is_lost() {
-        let hub = EventHub::new(2);
+    async fn event_hub_fans_out_live_confirmations_without_retaining_them() {
+        let hub = EventHub::new();
+        let mut receiver = hub.subscribe();
         hub.publish("nano.confirmation", json!({"hash":"a"})).await;
         hub.publish("nano.confirmation", json!({"hash":"b"})).await;
-        hub.publish("nano.confirmation", json!({"hash":"c"})).await;
-        let (reset, events) = hub.replay(Some("old-generation:0")).await;
-        assert!(reset);
-        assert_eq!(events.len(), 2);
+        assert_eq!(receiver.recv().await.expect("first").data["hash"], "a");
+        assert_eq!(receiver.recv().await.expect("second").data["hash"], "b");
     }
 
     #[tokio::test]
-    async fn event_hub_replays_after_same_generation_cursor() {
-        let hub = EventHub::new(4);
-        let first = hub.publish("nano.confirmation", json!({"hash":"a"})).await;
-        hub.publish("nano.confirmation", json!({"hash":"b"})).await;
-        let (reset, events) = hub.replay(Some(&first.id)).await;
-        assert!(!reset);
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].data["hash"], "b");
+    async fn event_hub_does_not_deduplicate_confirmations() {
+        // The node can send the same confirmation more than once, and the upstream
+        // guide requires integrations to dedupe by hash outside the node. The gateway
+        // does not do that for them: every event it receives is delivered.
+        let hub = EventHub::new();
+        let mut receiver = hub.subscribe();
+        hub.publish("nano.confirmation", json!({"hash":"a"})).await;
+        hub.publish("nano.confirmation", json!({"hash":"a"})).await;
+        assert_eq!(receiver.recv().await.expect("first").data["hash"], "a");
+        assert_eq!(receiver.recv().await.expect("second").data["hash"], "a");
     }
 
     #[tokio::test]
-    async fn event_hub_deduplicates_recent_confirmation_hashes() {
-        let hub = EventHub::new(4);
-        let first = hub
-            .publish(
-                "nano.confirmation",
-                json!({"hash":"A","account":"nano_test"}),
-            )
-            .await;
-        let duplicate = hub
-            .publish(
-                "nano.confirmation",
-                json!({"hash":"A","account":"nano_test"}),
-            )
-            .await;
-        assert_eq!(first.id, duplicate.id);
-        let (_, events) = hub.replay(None).await;
-        assert_eq!(events.len(), 1);
-        assert!(events[0].id.contains(':'));
-    }
-
-    #[tokio::test]
-    async fn event_hub_exposes_broadcast_lag_and_new_generation() {
-        let first = EventHub::new(1);
-        let mut receiver = first.subscribe();
-        let first_event = first
-            .publish("nano.confirmation", json!({"hash": "a"}))
-            .await;
-        first
-            .publish("nano.confirmation", json!({"hash": "b"}))
-            .await;
+    async fn event_hub_reports_broadcast_lag_by_closing_the_stream() {
+        // A subscriber that cannot keep up is closed rather than told about it. The
+        // node offers no replay, so there is nothing to catch up with.
+        let hub = EventHub::with_capacity(1);
+        let mut receiver = hub.subscribe();
+        hub.publish("nano.confirmation", json!({"hash": "a"})).await;
+        hub.publish("nano.confirmation", json!({"hash": "b"})).await;
         assert!(matches!(
             receiver.recv().await,
             Err(broadcast::error::RecvError::Lagged(_))
         ));
-
-        let second = EventHub::new(1);
-        let second_event = second
-            .publish("nano.confirmation", json!({"hash": "a"}))
-            .await;
-        assert_ne!(
-            first_event.id.split_once(':').expect("first cursor").0,
-            second_event.id.split_once(':').expect("second cursor").0
-        );
-    }
-
-    #[test]
-    fn stream_control_events_bypass_account_filters() {
-        let item = NanoEvent {
-            id: "1".into(),
-            event: "nano.stream_reset".into(),
-            data: json!({"reason":"upstream_disconnect"}),
-        };
-        assert!(event_matches_accounts(&item, Some(&["nano_other".into()])));
     }
 
     #[test]
@@ -4173,11 +4005,6 @@ node_ws_urls:
         assert!(!state.upstream_ready.load(Ordering::Relaxed));
         assert_eq!(state.active_ws_url().await.expect("standby").0, 1);
         assert_eq!(state.native.active_index(), 0);
-        let events = state.events.replay(None).await.1;
-        assert_eq!(
-            events.last().expect("disconnect reset").data["reason"],
-            "upstream_disconnected"
-        );
         server.abort();
     }
 
@@ -4215,30 +4042,19 @@ node_ws_urls:
         assert!(!state.upstream_ready.load(Ordering::Relaxed));
         assert_eq!(state.active_ws_url().await.expect("standby").0, 1);
         assert_eq!(state.native.active_index(), 0);
-        assert_eq!(
-            state
-                .events
-                .replay(None)
-                .await
-                .1
-                .last()
-                .expect("disconnect reset")
-                .data["reason"],
-            "upstream_disconnected"
-        );
         server.abort();
     }
 
     #[tokio::test]
-    async fn websocket_connection_failure_does_not_emit_spurious_reset() {
+    async fn websocket_connection_failure_emits_no_events() {
         let config = Config {
             node_ws_urls: vec!["ws://127.0.0.1:1".into()],
             ..Config::default()
         };
         let state = AppState::new(config).expect("state");
+        let mut receiver = state.events.subscribe();
         assert!(run_ws_bridge(state.clone()).await.is_err());
-        let (_, events) = state.events.replay(None).await;
-        assert!(events.is_empty());
+        assert!(receiver.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -4301,16 +4117,15 @@ node_ws_urls:
             ..Config::default()
         };
         let state = AppState::new(config).expect("state");
+        let mut receiver = state.events.subscribe();
         assert!(run_ws_bridge(state.clone()).await.is_ok());
         server.await.expect("server task");
-        let (_, events) = state.events.replay(None).await;
-        assert_eq!(events.len(), 3);
-        assert_eq!(events[0].event, "nano.stream_reset");
-        assert_eq!(events[0].data["reason"], "upstream_connected");
-        assert_eq!(events[1].event, "nano.confirmation");
-        assert_eq!(events[1].data["profile"], "nano-node/V28.2");
-        assert_eq!(events[2].event, "nano.stream_reset");
-        assert_eq!(events[2].data["reason"], "upstream_closed");
+        // The bridge publishes confirmations and nothing else: the node announces
+        // neither a connection nor a disconnection.
+        let first = receiver.recv().await.expect("confirmation");
+        assert_eq!(first.event, "nano.confirmation");
+        assert_eq!(first.data["hash"], "A");
+        assert_eq!(first.data["account"], "nano_test");
     }
 
     #[tokio::test]
@@ -4349,7 +4164,6 @@ node_ws_urls:
             .expect("task")
             .is_err());
         assert!(!state.upstream_ready.load(Ordering::Relaxed));
-        assert!(state.events.replay(None).await.1.is_empty());
         server.abort();
     }
 
@@ -4415,11 +4229,5 @@ node_ws_urls:
         assert!(run_ws_bridge(state.clone()).await.is_ok());
         server.await.expect("server task");
         assert_eq!(state.metrics.upstream_reconnects.load(Ordering::Relaxed), 1);
-        let (_, events) = state.events.replay(None).await;
-        assert_eq!(events.len(), 4);
-        assert_eq!(events[0].data["reason"], "upstream_connected");
-        assert_eq!(events[1].data["reason"], "upstream_closed");
-        assert_eq!(events[2].data["reason"], "upstream_reconnected");
-        assert_eq!(events[3].data["reason"], "upstream_closed");
     }
 }
