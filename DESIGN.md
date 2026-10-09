@@ -453,6 +453,15 @@ must not claim OpenRPC conformance.
 
 ## 12. SSE interface
 
+> **Status: the shipped contract differs from this proposal.** The v0.1
+> implementation serves a direct, non-replayable confirmation stream at
+> `GET`/`POST /events/confirmations`. Replay, cursors, and reset machinery
+> (`Last-Event-ID`, `nano.stream_reset`, retained buffers) and the managed
+> `/subscriptions` resources are **rejected for v0.1**, not merely deferred: SSE is
+> unidirectional and the node offers no replay, so a dropped stream closes and the
+> client reconciles through JSON-RPC. The material below is kept as the rationale
+> for that decision and as a record of the alternatives considered.
+
 ### 12.1 Purpose
 
 SSE provides HTTP-native server-to-client event delivery. It can simplify

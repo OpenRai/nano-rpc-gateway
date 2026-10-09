@@ -3984,7 +3984,11 @@ node_ws_urls:
         assert_eq!(process["action"], "process");
         assert_eq!(unavailable["condition"], "connection-refused");
         assert_eq!(duplicate["delivery"], "duplicate");
-        assert_eq!(disconnect["expected_gateway_event"], "nano.stream_reset");
+        assert_eq!(duplicate["expected_gateway_behavior"], "delivered");
+        assert_eq!(
+            disconnect["expected_gateway_behavior"],
+            "stream-closes-without-event"
+        );
     }
     #[test]
     fn live_v28_fixture_corpus_is_valid_and_profiled() {

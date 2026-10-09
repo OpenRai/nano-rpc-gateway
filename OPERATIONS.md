@@ -70,10 +70,10 @@ production if certificate management is external to the sidecar. When TLS
 terminates upstream, set `public_url` to the `https` address so the published
 contracts do not advertise the loopback listener.
 
-`/events/confirmations` is bounded gateway-local replay, not durable storage.
-After `nano.stream_reset`, reconcile state with JSON-RPC before applying new
-events. Rotate PASETO signing keys by replacing the configured verification
-key and issuing short-lived tokens; the gateway stores no token revocation DB.
+`/events/confirmations` is a live, non-replayable stream. When it closes,
+reconcile state with JSON-RPC before applying new events. Rotate PASETO signing
+keys by replacing the configured verification key and issuing short-lived
+tokens; the gateway stores no token revocation DB.
 
 For live RPC testing, use the OpenRPC Playground link in the generated
 reference and configure its endpoint from the published schema. Use AsyncAPI
