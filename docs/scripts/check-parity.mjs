@@ -11,6 +11,11 @@
 // undeclared addition. A matrix row marked present that the schema does not contain
 // is a stale or broken declaration. Both are failures, because either one means the
 // published contract and the reviewed matrix have drifted apart.
+//
+// It covers request parameters and response fields. The result half resolves each
+// method's result schema through a $ref, unions the branches of a oneOf, and reads
+// an inline object otherwise, so a gateway-added or removed response field fails the
+// same way a parameter would.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -49,6 +54,41 @@ function status(where, entry) {
 
 // ---------------------------------------------------------------- methods
 
+// Resolve a schema reference against the OpenRPC component schemas.
+function resolveSchema(schema) {
+  if (!schema) return undefined
+  if (schema.$ref) {
+    const name = schema.$ref.replace('#/components/schemas/', '')
+    return openrpc.components.schemas[name]
+  }
+  return schema
+}
+
+// The component schema name a method's result points at, or null when the result is
+// an inline object rather than a $ref. A matrix row names the same schema in its
+// `result` field, so the two can be compared.
+function resultSchemaName(method) {
+  const ref = method.result?.schema?.$ref
+  if (!ref) return null
+  return ref.replace('#/components/schemas/', '')
+}
+
+// Top-level property names a method's result declares, or null when it declares no
+// fixed shape (an open object such as rpc.discover's). Follows a $ref, unions the
+// branches of a oneOf, and reads an inline object otherwise.
+function resultProperties(method) {
+  const names = new Set()
+  const root = resolveSchema(method.result?.schema)
+  const branches = root?.oneOf ? root.oneOf : [root]
+  for (const branch of branches) {
+    const resolved = resolveSchema(branch)
+    if (resolved?.properties) {
+      for (const name of Object.keys(resolved.properties)) names.add(name)
+    }
+  }
+  return names.size ? names : null
+}
+
 const declaredMethods = new Set()
 for (const method of openrpc.methods) {
   const row = matrix.methods[method.name]
@@ -80,6 +120,39 @@ for (const method of openrpc.methods) {
       }
     }
   }
+
+  // A row that names a result schema must name the one the document actually points
+  // at. Otherwise a stale `result` entry reads as reviewed while the response
+  // contract it claims to describe is a different schema.
+  const resultName = resultSchemaName(method)
+  if (row.result !== undefined && resultName !== null && row.result !== resultName) {
+    problems.push(
+      `method "${method.name}": matrix names result schema "${row.result}", but the document references "${resultName}"`
+    )
+  }
+
+  const declaredFields = resultProperties(method)
+  // Supported methods need an inspectable response contract. Open-ended results
+  // remain allowed only when the matrix explicitly assigns a non-present status.
+  if (!declaredFields && row.status === 'present') {
+    problems.push(`method "${method.name}" is present but its result schema has no checkable properties`)
+  }
+  if (declaredFields) {
+    for (const [name, entry] of Object.entries(row.result_fields ?? {})) {
+      const fieldStatus = status(`method "${method.name}" result field "${name}"`, entry)
+      if (fieldStatus !== 'present') {
+        problems.push(`method "${method.name}" result field "${name}" is marked ${fieldStatus} but is still exposed`)
+      }
+      if (!declaredFields.has(name)) {
+        problems.push(`method "${method.name}" result field "${name}" is marked present but the schema does not declare it`)
+      }
+    }
+    for (const name of declaredFields) {
+      if (!row.result_fields?.[name]) {
+        problems.push(`method "${method.name}" result field "${name}" is exposed but has no parity-matrix row`)
+      }
+    }
+  }
 }
 
 for (const [name, entry] of Object.entries(matrix.methods)) {
@@ -103,6 +176,55 @@ for (const name of Object.keys(openrpc.components.schemas)) {
     schemaGraph.includes(`"#/components/schemas/${name}"`)
   if (!used) {
     problems.push(`component schema "${name}" is defined but nothing references it`)
+  }
+}
+
+// ------------------------------------------------------------ error refs
+
+// The meta-schema validates an error definition by shape and a `$ref` as a string,
+// so neither asks whether the two names agree. `components.errors` is a
+// patternProperties map with no `required` list, which means a misspelled key
+// holding a well-formed error validates, and `{"$ref": ...}` validates as long as
+// it is a string. A dangling pointer therefore passes schema validation while
+// documenting an error a reader cannot reach, so resolve every ref here instead.
+//
+// This check is load-bearing rather than defensive: it is what fails the shape the
+// gateway previously published, where the definitions sat in a top-level `errors`
+// key that the document schema does not allow and every method ref pointed at the
+// empty `components.errors` namespace instead.
+const errorComponents = openrpc.components.errors
+if (!errorComponents || Object.keys(errorComponents).length === 0) {
+  problems.push('the document declares no components.errors, so no method error ref can resolve')
+}
+
+const PREAMBLE = '#/components/errors/'
+for (const method of openrpc.methods) {
+  for (const error of method.errors ?? []) {
+    const ref = error?.$ref
+    if (!ref) continue
+    if (!ref.startsWith(PREAMBLE)) {
+      problems.push(`method "${method.name}": error ref "${ref}" is outside components/errors`)
+      continue
+    }
+    const name = ref.slice(PREAMBLE.length)
+    if (!errorComponents?.[name]) {
+      const defined = Object.keys(errorComponents ?? {}).sort().join(', ')
+      problems.push(
+        `method "${method.name}": error ref "${ref}" is dangling; ` +
+          `components.errors defines ${defined || '(nothing)'}`
+      )
+    }
+  }
+}
+
+// A definition no method can reach is dead weight in a published contract, the
+// error-definition counterpart of the unused-schema check above.
+for (const name of Object.keys(errorComponents ?? {})) {
+  const used = openrpc.methods.some(method =>
+    (method.errors ?? []).some(error => error?.$ref === `${PREAMBLE}${name}`)
+  )
+  if (!used) {
+    problems.push(`error "${name}" is defined but no method references it`)
   }
 }
 

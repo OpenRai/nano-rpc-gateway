@@ -16,7 +16,7 @@
     },
     "translation_layer_items": {
       "1": "JSON-RPC 2.0 envelope: method is the upstream action, params is the upstream request object without action, result is the upstream response object unchanged.",
-      "2": "A node error whose only key is error becomes a JSON-RPC error whose message is that string verbatim, under one fixed code. Failures that never reach the node use standard JSON-RPC codes.",
+      "2": "A node error whose only key is error becomes a JSON-RPC error whose message is that string verbatim, under one fixed code (-32000), which is reserved for it. A failure that never reaches the node, or a gateway-detected mismatch on an upstream response, uses the standard JSON-RPC internal error code (-32603) and a gateway-authored message.",
       "3": "Events travel as SSE, one stream per subscription: the event name is the upstream topic and the payload carries every upstream field unchanged, including time. Subscribe options map to connect-time parameters.",
       "4": "If the upstream WebSocket drops the client stream closes, as a node closing a WebSocket would. No buffering, replay or gap announcement.",
       "5": "rpc.discover is allowed as the standard OpenRPC discovery method. x-* extensions are allowed as annotations that restate upstream guidance and change no request or response.",
@@ -29,6 +29,16 @@
       "anchor": "rpc-protocol#version",
       "params": {},
       "result": "VersionResult",
+      "result_fields": {
+        "rpc_version": {"status": "present"},
+        "store_version": {"status": "present"},
+        "protocol_version": {"status": "present"},
+        "node_vendor": {"status": "present"},
+        "store_vendor": {"status": "present"},
+        "network": {"status": "present"},
+        "network_identifier": {"status": "present"},
+        "build_info": {"status": "present"}
+      },
       "note": "Exposed as documented. Two observed-but-undocumented provider fields (requestsLimit, requestsRemaining, requestLimitReset) pass through under item 1 and are not declared."
     },
     "block_count": {
@@ -36,6 +46,11 @@
       "anchor": "rpc-protocol#block_count",
       "params": {},
       "result": "BlockCountResult",
+      "result_fields": {
+        "count": {"status": "present"},
+        "unchecked": {"status": "present"},
+        "cemented": {"status": "present", "note": "Documented and returned once include_cemented applies (default true upstream)."}
+      },
       "note": "Exposed as documented. include_cemented is not declared; it defaults to true upstream and the gateway does not alter it."
     },
     "account_info": {
@@ -65,6 +80,25 @@
         }
       },
       "result": "AccountInfoResult",
+      "result_fields": {
+        "frontier": {"status": "present"},
+        "open_block": {"status": "present"},
+        "representative_block": {"status": "present"},
+        "balance": {"status": "present"},
+        "modified_timestamp": {"status": "present"},
+        "block_count": {"status": "present"},
+        "account_version": {"status": "present"},
+        "confirmation_height": {"status": "present"},
+        "confirmation_height_frontier": {"status": "present"},
+        "representative": {"status": "present", "note": "Present when representative was requested."},
+        "weight": {"status": "present", "note": "Present when weight was requested."},
+        "receivable": {"status": "present", "note": "Present when receivable was requested."},
+        "confirmed_frontier": {"status": "present", "note": "Present when include_confirmed was requested."},
+        "confirmed_balance": {"status": "present", "note": "Present when include_confirmed was requested."},
+        "confirmed_height": {"status": "present", "note": "Present when include_confirmed was requested."},
+        "confirmed_representative": {"status": "present", "note": "Present when representative and include_confirmed were both requested."},
+        "confirmed_receivable": {"status": "present", "note": "Present when receivable and include_confirmed were both requested."}
+      },
       "note": "All flags default false, as upstream, and are forwarded untouched so the node decides. No confirmed_* field appears unless include_confirmed was requested."
     },
     "receivable": {
@@ -109,6 +143,9 @@
         }
       },
       "result": "ReceivableResult",
+      "result_fields": {
+        "blocks": {"status": "present"}
+      },
       "note": "Shape selection observed on V29.0-DEV and not stated in the docs: source wins over threshold and sorting, and sorting alone selects the hash-to-amount shape. See fixtures/native/v29.0-dev/observations.md."
     },
     "account_balance": {
@@ -124,7 +161,11 @@
           "status": "present"
         }
       },
-      "result": "AccountBalanceResult"
+      "result": "AccountBalanceResult",
+      "result_fields": {
+        "balance": {"status": "present"},
+        "receivable": {"status": "present"}
+      }
     },
     "accounts_balances": {
       "status": "present",
@@ -140,6 +181,10 @@
         }
       },
       "result": "AccountsBalancesResult",
+      "result_fields": {
+        "balances": {"status": "present", "note": "Omitted when every requested account failed."},
+        "errors": {"status": "present", "note": "Omitted when no requested account failed."}
+      },
       "note": "balances and errors are both optional upstream; the gateway asserts neither. An account absent from the ledger reports zero balance and zero receivable rather than an error, per the docs."
     },
     "account_history": {
@@ -184,6 +229,12 @@
         }
       },
       "result": "AccountHistoryResult",
+      "result_fields": {
+        "account": {"status": "present"},
+        "history": {"status": "present"},
+        "previous": {"status": "present", "note": "Present only when count truncated the result."},
+        "next": {"status": "present", "note": "Present in place of previous when reverse was requested."}
+      },
       "note": "count accepts -1 for the whole chain. head is inclusive, confirmed by observation on V29.0-DEV. previous is returned when count truncates, and reverse renames it to next."
     },
     "block_info": {
@@ -205,6 +256,20 @@
         }
       },
       "result": "BlockInfoResult",
+      "result_fields": {
+        "block_account": {"status": "present"},
+        "amount": {"status": "present"},
+        "balance": {"status": "present"},
+        "height": {"status": "present"},
+        "local_timestamp": {"status": "present"},
+        "confirmed": {"status": "present"},
+        "successor": {"status": "present"},
+        "subtype": {"status": "present", "note": "State blocks only."},
+        "contents": {"status": "present", "note": "A JSON string unless json_block was requested."},
+        "linked_account": {"status": "present", "note": "Present when include_linked_account was requested."},
+        "source_account": {"status": "present", "note": "Present when source was requested."},
+        "receive_hash": {"status": "present", "note": "Present when receive_hash was requested."}
+      },
       "note": "subtype is state blocks only and is optional. contents is a JSON string unless json_block was requested; the gateway no longer parses it into an object. include_linked_account was added in V28.0 and is not deprecated."
     },
     "blocks_info": {
@@ -240,6 +305,10 @@
         }
       },
       "result": "BlocksInfoResult",
+      "result_fields": {
+        "blocks": {"status": "present"},
+        "blocks_not_found": {"status": "present", "note": "Present when include_not_found was requested."}
+      },
       "note": "blocks_not_found appears only when include_not_found was requested and is passed through. topo_height was observed on V29.0-DEV and is undocumented; it passes through under item 1 and is not declared."
     },
     "accounts_frontiers": {
@@ -252,6 +321,10 @@
         }
       },
       "result": "AccountsFrontiersResult",
+      "result_fields": {
+        "frontiers": {"status": "present", "note": "Omitted when every requested account failed."},
+        "errors": {"status": "present", "note": "Omitted when no requested account failed."}
+      },
       "note": "frontiers and errors are both optional upstream; the gateway asserts neither. Head blocks can be unconfirmed, so confirm one with blocks_info before treating it as final."
     },
     "accounts_receivable": {
@@ -288,6 +361,9 @@
         }
       },
       "result": "AccountsReceivableResult",
+      "result_fields": {
+        "blocks": {"status": "present"}
+      },
       "note": "Same shape-selection rule as receivable, verified for the single-account form. A public provider may refuse this action with its own error, which item 2 surfaces verbatim."
     },
     "block_confirm": {
@@ -300,6 +376,9 @@
         }
       },
       "result": "BlockConfirmResult",
+      "result_fields": {
+        "started": {"status": "present"}
+      },
       "note": "started is always \"1\" and never says the block confirmed. Guarded by a token bucket on a budget separate from reads plus a bounded per-hash cooldown, both of which are item 6. Neither guard inspects block state, because that would change the method's behaviour."
     },
     "process": {
@@ -330,6 +409,10 @@
         }
       },
       "result": "ProcessResult",
+      "result_fields": {
+        "hash": {"status": "present", "note": "The synchronous result."},
+        "started": {"status": "present", "note": "Returned instead of hash when async was requested."}
+      },
       "note": "subtype is strongly recommended upstream and required in a future node version. With async the result is started rather than hash, which the schema models."
     },
     "rpc.discover": {
