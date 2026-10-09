@@ -4,11 +4,15 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const docsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const before = snapshot(path.join(docsDir, 'api-docs'))
+const repoDir = path.resolve(docsDir, '..')
+// Both the served reference and the published artifacts under generated/ are
+// reproduced by `npm run generate`, so a stale copy in either is a failure.
+const generatedRoots = [path.join(docsDir, 'api-docs'), path.join(repoDir, 'generated')]
+const before = snapshot(generatedRoots)
 execFileSync('npm', ['run', 'generate'], { cwd: docsDir, stdio: 'inherit' })
-const after = snapshot(path.join(docsDir, 'api-docs'))
+const after = snapshot(generatedRoots)
 if (before !== after) {
-  console.error('Generated documentation is stale; run make docs-generate')
+  console.error('Generated documentation or client is stale; run make docs-generate')
   process.exit(1)
 }
 
@@ -71,10 +75,13 @@ for (const anchor of anchors) {
   }
 }
 
-function snapshot(root) {
-  return fs.readdirSync(root, { recursive: true })
-    .filter(name => fs.statSync(path.join(root, name)).isFile())
-    .sort()
-    .map(name => `${name}\0${fs.readFileSync(path.join(root, name), 'base64')}`)
+function snapshot(roots) {
+  return roots
+    .flatMap(root =>
+      fs.readdirSync(root, { recursive: true })
+        .filter(name => fs.statSync(path.join(root, name)).isFile())
+        .sort()
+        .map(name => `${path.basename(root)}/${name}\0${fs.readFileSync(path.join(root, name), 'base64')}`)
+    )
     .join('\n')
 }

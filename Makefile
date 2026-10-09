@@ -1,4 +1,4 @@
-.PHONY: check test clippy build generate-types contracts docs-install docs-validate docs-generate docs-check docs-model-smoke docs-preview require-nano-rpc gateway playground gateway-playground benchmark resource-benchmark container-benchmark transport-smoke devnet-up devnet-smoke devnet-down dev-tmux dev-tmux-start dev-tmux-stop
+.PHONY: check test clippy build generate-types client contracts docs-install docs-validate docs-generate docs-check docs-model-smoke docs-preview require-nano-rpc gateway playground gateway-playground benchmark resource-benchmark container-benchmark transport-smoke devnet-up devnet-smoke devnet-down dev-tmux dev-tmux-start dev-tmux-stop
 check:
 	cargo check --locked
 test:
@@ -8,7 +8,9 @@ clippy:
 build:
 	cargo build --release --locked
 generate-types:
-	./scripts/generate-types.sh "$${OPENRPC_SCHEMA_URL:-http://127.0.0.1:8090/openrpc.json}" generated
+	./scripts/generate-types.sh "$${OPENRPC_SCHEMA_URL:-docs/api-docs/openrpc.json}" generated
+client:
+	./scripts/generate-types.sh docs/api-docs/openrpc.json generated
 contracts:
 	cargo run --quiet -- contracts --output-dir docs/api-docs
 	cp -f docs/api-docs/openrpc.json generated/nano-node-v28.2.openrpc.json

@@ -19,8 +19,9 @@ its `method` matches the SSE `event:` name and it has no `id` member.
 
 The Clean V28.2 profile is authority-reviewed in
 [SCHEMA_POLICY.md](SCHEMA_POLICY.md), exposes a stable artifact digest, and
-ships generated TypeScript bindings in [generated/](generated/). Regenerate
-bindings with `make generate-types` against the reviewed schema endpoint.
+ships generated TypeScript bindings in [generated/](generated/). They are
+regenerated offline from the reviewed OpenRPC document with `make client`
+(after `make docs-install`); `make docs-check` fails when they drift.
 
 The committed reference in [docs/api-docs/](docs/api-docs/) combines RPC and Events
 tabs, global search, deep links, and raw OpenRPC/AsyncAPI downloads. Run

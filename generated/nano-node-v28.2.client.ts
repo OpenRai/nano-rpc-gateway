@@ -20,36 +20,501 @@ import {
   parseOpenRPCDocument,
 } from "@open-rpc/schema-utils-js";
 
+export type StringDj4X5WuP = string;
+type AlwaysTrue = any;
 export type StringDoaGddGA = string;
-export type NullQu0Arl1F = null;
-export type OneOfNullQu0Arl1FStringDoaGddGABsU3LTQx = StringDoaGddGA | NullQu0Arl1F;
-export type BooleanVyG3AETh = boolean;
-export interface ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAXrJ0QBSL {
+/**
+ *
+ * Hash of the genesis open block.
+ *
+ */
+export type StringQX4HF8LM = string;
+/**
+ *
+ * Balance at frontier, in raw. It can include unconfirmed state.
+ *
+ */
+export type StringMwNer8X6 = string;
+/**
+ *
+ * Cemented blocks on the account chain.
+ *
+ */
+export type StringI0X9YnYl = string;
+/**
+ *
+ * The block hash at confirmation_height.
+ *
+ */
+export type StringOv9Ku8Iy = string;
+/**
+ *
+ * Present when `include_confirmed` was requested.
+ *
+ */
+export type StringL3ISYAWE = string;
+/**
+ *
+ * Present when `include_confirmed` was requested. Confirm a frontier with blocks_info before treating it as final.
+ *
+ */
+export type StringCEZ2CAMt = string;
+/**
+ *
+ * Present when `include_confirmed` was requested. Same value as confirmation_height.
+ *
+ */
+export type StringT5LN5K9P = string;
+/**
+ *
+ * Present when both `receivable` and `include_confirmed` were requested.
+ *
+ */
+export type StringXlOXBOeH = string;
+/**
+ *
+ * Present when both `representative` and `include_confirmed` were requested.
+ *
+ */
+export type StringWtd49Ke2 = string;
+/**
+ *
+ * Current frontier hash. It can be ahead of cemented state.
+ *
+ */
+export type StringYPoaWPwC = string;
+/**
+ *
+ * Present when `receivable` was requested.
+ *
+ */
+export type StringJkagc7Ac = string;
+/**
+ *
+ * Present when `representative` was requested.
+ *
+ */
+export type StringJUbpM6Vi = string;
+/**
+ *
+ * Present when `weight` was requested.
+ *
+ */
+export type StringOhq3E2Vi = string;
+export type UnorderedSetOfStringDoaGddGADvj0XlFa = StringDoaGddGA[];
+export interface ObjectBd6DQSjJ { [key: string]: any; }
+export interface ObjectOfStringDoaGddGAStringDoaGddGAWrpyYBUS {
   amount: StringDoaGddGA;
-  hash: StringDoaGddGA;
   source: StringDoaGddGA;
   [k: string]: any;
 }
-type AlwaysTrue = any;
-export type SetOfAnykhpArGaq = AlwaysTrue[];
-export interface ObjectIZgu6KjQ { [key: string]: any; }
-export interface ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGABooleanVyG3AEThStringDoaGddGAObjectIZgu6KjQStringDoaGddGAStringDoaGddGACdi3KcvW {
-  amount: StringDoaGddGA;
-  balance: StringDoaGddGA;
-  block: ObjectIZgu6KjQ;
-  block_account: StringDoaGddGA;
-  confirmed: BooleanVyG3AETh;
-  hash: StringDoaGddGA;
-  height: StringDoaGddGA;
-  subtype: StringDoaGddGA;
+/**
+ *
+ * Account to that account's receivable blocks.
+ *
+ */
+export interface ObjectWrpyYBUS { [key: string]: any; }
+/**
+ *
+ * The node selects one of three shapes from the request parameters: an array of hashes by default, hash to amount with `threshold`, and hash to amount and source account with `source`.
+ *
+ */
+export type OneOfObjectBd6DQSjJObjectWrpyYBUSUnorderedSetOfStringDoaGddGADvj0XlFaQ7Z5VdZJ = UnorderedSetOfStringDoaGddGADvj0XlFa | ObjectBd6DQSjJ | ObjectWrpyYBUS;
+/**
+ *
+ * Balance in raw. Confirmed only when include_only_confirmed is true.
+ *
+ */
+export type String3NIaRA0V = string;
+/**
+ *
+ * Incoming amount not yet received, in raw.
+ *
+ */
+export type StringDhLstFBz = string;
+export interface ObjectOfStringDhLstFBzString3NIaRA0VYTXNW2NS {
+  balance: String3NIaRA0V;
+  receivable: StringDhLstFBz;
   [k: string]: any;
 }
-export interface ObjectM3DCYHfD { [key: string]: any; }
-export type Integer2AHOqbcQ = number;
-export type UnorderedSetOfStringDoaGddGADvj0XlFa = StringDoaGddGA[];
-export interface ObjectHAgrRKSz { [key: string]: any; }
-export interface ObjectOfStringDoaGddGACa8EbEFX {
+/**
+ *
+ * One entry per requested account. This is not an aggregate.
+ *
+ */
+export interface ObjectAbZMdPnf { [key: string]: any; }
+/**
+ *
+ * Per-account error message.
+ *
+ */
+export interface ObjectC3V3RRZs { [key: string]: any; }
+/**
+ *
+ * "true" when the node reports the entry cemented.
+ *
+ */
+export type String6M2H3ZC2 = string;
+/**
+ *
+ * Present when include_linked_account was requested.
+ *
+ */
+export type StringSxBQH7U7 = string;
+/**
+ *
+ * Hash of the preceding block on the account chain.
+ *
+ */
+export type StringCbZ6NzeY = string;
+/**
+ *
+ * State blocks only. The source of truth for the block's kind.
+ *
+ */
+export type StringZcQbzM37 = string;
+/**
+ *
+ * Without `raw`, `type` is `send` or `receive` and change and epoch blocks are skipped. With `raw`, it is the block type and every block field is present. For an open block in raw mode, `account` is the source block's account.
+ *
+ */
+export interface ObjectOfStringDoaGddGAStringDoaGddGAStringZcQbzM37StringDoaGddGAStringDoaGddGAStringCbZ6NzeYStringDoaGddGAStringSxBQH7U7StringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAString6M2H3ZC2StringDoaGddGAStringDoaGddGAStringDoaGddGAWrpyYBUS {
+  account: StringDoaGddGA;
+  amount: StringDoaGddGA;
+  balance?: StringDoaGddGA;
+  confirmed?: String6M2H3ZC2;
+  hash: StringDoaGddGA;
+  height?: StringDoaGddGA;
+  link?: StringDoaGddGA;
+  link_as_account?: StringDoaGddGA;
+  linked_account?: StringSxBQH7U7;
+  local_timestamp?: StringDoaGddGA;
+  previous?: StringCbZ6NzeY;
+  representative?: StringDoaGddGA;
+  signature?: StringDoaGddGA;
+  subtype?: StringZcQbzM37;
+  type: StringDoaGddGA;
+  work?: StringDoaGddGA;
+  [k: string]: any;
+}
+export type UnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringZcQbzM37StringDoaGddGAStringDoaGddGAStringCbZ6NzeYStringDoaGddGAStringSxBQH7U7StringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAString6M2H3ZC2StringDoaGddGAStringDoaGddGAStringDoaGddGAWrpyYBUSwrpyYBUS = ObjectOfStringDoaGddGAStringDoaGddGAStringZcQbzM37StringDoaGddGAStringDoaGddGAStringCbZ6NzeYStringDoaGddGAStringSxBQH7U7StringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAString6M2H3ZC2StringDoaGddGAStringDoaGddGAStringDoaGddGAWrpyYBUS[];
+/**
+ *
+ * Present in place of `previous` when `reverse` was requested.
+ *
+ */
+export type String87Q5PkLh = string;
+/**
+ *
+ * Present only when `count` truncated the result: the hash to pass as the next `head`.
+ *
+ */
+export type StringZYBWxaop = string;
+/**
+ *
+ * Block amount in raw.
+ *
+ */
+export type StringIodF0WhR = string;
+/**
+ *
+ * Account balance after this block, in raw.
+ *
+ */
+export type StringMbsHjZkO = string;
+/**
+ *
+ * Account that owns the block.
+ *
+ */
+export type StringQA8ZsG7N = string;
+/**
+ *
+ * "true" only when the node reports the block cemented.
+ *
+ */
+export type StringR1AFOEl0 = string;
+/**
+ *
+ * Block content. A JSON string unless `json_block` was requested.
+ *
+ */
+export type AnyMpJIctev = any;
+/**
+ *
+ * Present when include_linked_account was requested; "0" when there is none.
+ *
+ */
+export type StringW8KZSlP1 = string;
+export type StringCif1X4GD = "send" | "receive" | "change" | "epoch";
+/**
+ *
+ * The block that superseded this one.
+ *
+ */
+export type StringCSm9R3Ch = string;
+/**
+ *
+ * `subtype` is present for state blocks only, and is the source of truth for a state block's kind.
+ *
+ */
+export interface ObjectOfStringCSm9R3ChStringCif1X4GDStringDoaGddGAStringDoaGddGAStringDoaGddGAStringW8KZSlP1StringDoaGddGAAnyMpJIctevStringR1AFOEl0StringQA8ZsG7NStringMbsHjZkOStringIodF0WhROfbngHHH {
+  amount: StringIodF0WhR;
+  balance: StringMbsHjZkO;
+  block_account: StringQA8ZsG7N;
+  confirmed: StringR1AFOEl0;
+  contents?: AnyMpJIctev;
+  height: StringDoaGddGA;
+  linked_account?: StringW8KZSlP1;
+  local_timestamp: StringDoaGddGA;
+  receive_hash?: StringDoaGddGA;
+  source_account?: StringDoaGddGA;
+  subtype?: StringCif1X4GD;
+  successor?: StringCSm9R3Ch;
+  [k: string]: any;
+}
+export interface Object4MtmEcsW { [key: string]: any; }
+/**
+ *
+ * Present when include_not_found was requested.
+ *
+ */
+export type UnorderedSetOfStringDoaGddGAC4M4Nmat = StringDoaGddGA[];
+/**
+ *
+ * Account to the node's message for that account.
+ *
+ */
+export interface ObjectWLN7TddM { [key: string]: any; }
+/**
+ *
+ * Account to head block hash.
+ *
+ */
+export interface ObjectSm7CBkZQ { [key: string]: any; }
+export type String1ZlAN1WB = "1";
+export interface ObjectOfStringDoaGddGAVIQJ5KES {
+  hash: StringDoaGddGA;
+  [k: string]: any;
+}
+/**
+ *
+ * Returned when `async` was requested. The block was queued, not processed; the outcome arrives on the `new_unconfirmed_block` topic.
+ *
+ */
+export interface ObjectOfString1ZlAN1WBZqiOl4Zt {
+  started: String1ZlAN1WB;
+  [k: string]: any;
+}
+/**
+ *
+ * Add the confirmed_ fields. Without it the response carries no confirmed_* fields.
+ *
+ */
+export type BooleanHXUrsVF3 = boolean;
+/**
+ *
+ * Add the receivable total, plus confirmed_receivable when include_confirmed is also set.
+ *
+ */
+export type BooleanHypmFHQk = boolean;
+/**
+ *
+ * Add the representative account.
+ *
+ */
+export type BooleanWS3RrW0S = boolean;
+/**
+ *
+ * Add the account's voting weight.
+ *
+ */
+export type Boolean8TiXyLsS = boolean;
+/**
+ *
+ * Maximum number of blocks to return.
+ *
+ */
+export type IntegerX44JF2QN = number;
+/**
+ *
+ * Include blocks without a finished confirmation.
+ *
+ */
+export type BooleanRFp1Djff = boolean;
+/**
+ *
+ * Only return blocks whose confirmation height is up to date.
+ *
+ * @default true
+ *
+ */
+export type BooleanLSQX1S6K = boolean;
+/**
+ *
+ * Only return blocks that this version (epoch) or later can pocket.
+ *
+ */
+export type IntegerFmbvneeq = number;
+/**
+ *
+ * Sort blocks by amount, descending.
+ *
+ */
+export type BooleanDMRhnYGv = boolean;
+/**
+ *
+ * Include the sending account with each block. Selects the hash-to-object result shape.
+ *
+ */
+export type BooleanT1EfjvoC = boolean;
+/**
+ *
+ * Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape.
+ *
+ */
+export type StringWIcCNnYT = string;
+/**
+ *
+ * Report only blocks whose confirmation height is up to date.
+ *
+ * @default true
+ *
+ */
+export type BooleanFWkjn0X9 = boolean;
+export type UnorderedSetOfStringDj4X5WuPZn6X8C6Q = StringDj4X5WuP[];
+/**
+ *
+ * Only count blocks whose confirmation height is up to date.
+ *
+ * @default true
+ *
+ */
+export type BooleanAYhcVA2Z = boolean;
+/**
+ *
+ * Only return entries connected to these accounts.
+ *
+ */
+export type UnorderedSetOfStringDj4X5WuPclbCAPnO = StringDj4X5WuP[];
+/**
+ *
+ * Maximum number of entries. -1 returns the whole chain.
+ *
+ */
+export type IntegerH6DnxQ1D = number;
+/**
+ *
+ * Start from this block instead of the account's latest, and include it as the first entry. Use it to paginate.
+ *
+ */
+export type StringCrPq71WT = string;
+/**
+ *
+ * Add `linked_account` to each entry, or "0" when there is none or the block is pruned.
+ *
+ */
+export type BooleanP5FJHJKw = boolean;
+/**
+ *
+ * Skip this many blocks, starting from head when given.
+ *
+ */
+export type IntegerGteuOQQB = number;
+/**
+ *
+ * Return full block content instead of a send/receive summary. Required to see change and epoch blocks, which the summary skips.
+ *
+ */
+export type BooleanAfhlTRWf = boolean;
+/**
+ *
+ * Walk forward from head toward the frontier instead of backward. The response reports `next` in place of `previous`.
+ *
+ */
+export type Boolean8JDgwndi = boolean;
+/**
+ *
+ * Add `linked_account`, or "0" when there is none or the block is pruned.
+ *
+ */
+export type BooleanQHj8P06R = boolean;
+/**
+ *
+ * Return `contents` as a JSON subtree instead of a JSON string.
+ *
+ */
+export type BooleanVwc1CvPU = boolean;
+/**
+ *
+ * Report unknown hashes in `blocks_not_found` instead of failing.
+ *
+ */
+export type Boolean8Kq4GA3X = boolean;
+/**
+ *
+ * For send blocks, add the matching receive block hash.
+ *
+ */
+export type BooleanR0K1MOm3 = boolean;
+/**
+ *
+ * Add `source_account` for receive and open blocks, and "0" for send and change blocks.
+ *
+ */
+export type BooleanFlIR4Sj5 = boolean;
+/**
+ *
+ * Maximum number of blocks to return per account.
+ *
+ */
+export type Integer4Vdm2KJ2 = number;
+/**
+ *
+ * Sort each account's blocks by amount, descending.
+ *
+ */
+export type BooleanYR7YfAlC = boolean;
+/**
+ *
+ * The block to ask online representatives about.
+ *
+ */
+export type StringLgMjIZkp = string;
+/**
+ *
+ * Queue the block and return `started` immediately instead of waiting. The outcome arrives on the `new_unconfirmed_block` topic.
+ *
+ */
+export type BooleanZLs0PI9M = boolean;
+export interface ObjectIZgu6KjQ { [key: string]: any; }
+/**
+ *
+ * Force fork resolution when the block is not accepted as the fork.
+ *
+ */
+export type Boolean7ODk9QhO = boolean;
+/**
+ *
+ * Send `block` as a JSON subtree instead of a JSON string.
+ *
+ */
+export type BooleanWmXjsmoj = boolean;
+/**
+ *
+ * Extra check on the block's intent. Strongly recommended, and required in a future node version.
+ *
+ */
+export type StringV1BxFf5Z = "send" | "receive" | "open" | "change" | "epoch";
+export interface ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAStringQX4HF8LMStringDoaGddGAStringDoaGddGASEXrj8Np {
+  build_info?: StringDoaGddGA;
+  network?: StringDoaGddGA;
+  network_identifier?: StringQX4HF8LM;
+  node_vendor?: StringDoaGddGA;
+  protocol_version?: StringDoaGddGA;
   rpc_version: StringDoaGddGA;
+  store_vendor?: StringDoaGddGA;
+  store_version?: StringDoaGddGA;
   [k: string]: any;
 }
 export interface ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAQvZx7DNZ {
@@ -58,37 +523,76 @@ export interface ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAQvZx7DNZ {
   unchecked: StringDoaGddGA;
   [k: string]: any;
 }
-export interface ObjectOfOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxBooleanVyG3AEThOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxStringDoaGddGAOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxStringDoaGddGAStringDoaGddGAGNSf57PP {
-  balance: StringDoaGddGA;
-  confirmation_height: StringDoaGddGA;
-  confirmation_height_frontier: OneOfNullQu0Arl1FStringDoaGddGABsU3LTQx;
-  confirmed_balance: StringDoaGddGA;
-  confirmed_frontier: OneOfNullQu0Arl1FStringDoaGddGABsU3LTQx;
-  frontier: OneOfNullQu0Arl1FStringDoaGddGABsU3LTQx;
-  open_block: OneOfNullQu0Arl1FStringDoaGddGABsU3LTQx;
-  opened: BooleanVyG3AETh;
-  representative_block: OneOfNullQu0Arl1FStringDoaGddGABsU3LTQx;
+/**
+ *
+ * Fields beyond this set appear only when the matching request parameter is set.
+ *
+ */
+export interface ObjectOfStringOhq3E2ViStringDoaGddGAStringJUbpM6ViStringJkagc7AcStringDoaGddGAStringDoaGddGAStringYPoaWPwCStringWtd49Ke2StringXlOXBOeHStringT5LN5K9PStringCEZ2CAMtStringL3ISYAWEStringOv9Ku8IyStringI0X9YnYlStringDoaGddGAStringMwNer8X6StringDoaGddGAHgLIphqi {
+  account_version: StringDoaGddGA;
+  balance: StringMwNer8X6;
+  block_count: StringDoaGddGA;
+  confirmation_height?: StringI0X9YnYl;
+  confirmation_height_frontier?: StringOv9Ku8Iy;
+  confirmed_balance?: StringL3ISYAWE;
+  confirmed_frontier?: StringCEZ2CAMt;
+  confirmed_height?: StringT5LN5K9P;
+  confirmed_receivable?: StringXlOXBOeH;
+  confirmed_representative?: StringWtd49Ke2;
+  frontier: StringYPoaWPwC;
+  modified_timestamp: StringDoaGddGA;
+  open_block: StringDoaGddGA;
+  receivable?: StringJkagc7Ac;
+  representative?: StringJUbpM6Vi;
+  representative_block: StringDoaGddGA;
+  weight?: StringOhq3E2Vi;
   [k: string]: any;
 }
-export type UnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAXrJ0QBSLZpJh709U = ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAXrJ0QBSL[];
-export interface ObjectOfStringDoaGddGAStringDoaGddGAA6BJBQrw {
-  balance: StringDoaGddGA;
-  receivable: StringDoaGddGA;
+export interface ObjectOfOneOfObjectBd6DQSjJObjectWrpyYBUSUnorderedSetOfStringDoaGddGADvj0XlFaQ7Z5VdZJWrpyYBUS {
+  blocks: OneOfObjectBd6DQSjJObjectWrpyYBUSUnorderedSetOfStringDoaGddGADvj0XlFaQ7Z5VdZJ;
   [k: string]: any;
 }
-export interface ObjectOfSetOfAnykhpArGaqStringDoaGddGAAJJ0BX3C {
+/**
+ *
+ * Both maps are optional; the node omits one when no entry applies to it. An account absent from the ledger reports a zero balance and zero receivable rather than an error.
+ *
+ */
+export interface ObjectOfObjectC3V3RRZsObjectAbZMdPnf5An3SeRn {
+  balances?: ObjectAbZMdPnf;
+  errors?: ObjectC3V3RRZs;
+  [k: string]: any;
+}
+export interface ObjectOfStringZYBWxaopString87Q5PkLhUnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringZcQbzM37StringDoaGddGAStringDoaGddGAStringCbZ6NzeYStringDoaGddGAStringSxBQH7U7StringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAString6M2H3ZC2StringDoaGddGAStringDoaGddGAStringDoaGddGAWrpyYBUSwrpyYBUSStringDoaGddGAWrpyYBUS {
   account: StringDoaGddGA;
-  history: SetOfAnykhpArGaq;
+  history: UnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringZcQbzM37StringDoaGddGAStringDoaGddGAStringCbZ6NzeYStringDoaGddGAStringSxBQH7U7StringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAString6M2H3ZC2StringDoaGddGAStringDoaGddGAStringDoaGddGAWrpyYBUSwrpyYBUS;
+  next?: String87Q5PkLh;
+  previous?: StringZYBWxaop;
   [k: string]: any;
 }
-export interface ObjectOfObjectM3DCYHfDPpfMJsde {
-  blocks: ObjectM3DCYHfD;
+export interface ObjectOfUnorderedSetOfStringDoaGddGAC4M4NmatObject4MtmEcsWZPkjUiIM {
+  blocks: Object4MtmEcsW;
+  blocks_not_found?: UnorderedSetOfStringDoaGddGAC4M4Nmat;
   [k: string]: any;
 }
-export interface ObjectOfStringDoaGddGAVIQJ5KES {
-  hash: StringDoaGddGA;
+/**
+ *
+ * Both maps are optional. The node omits `frontiers` when every requested account failed and omits `errors` when none did. A head block can be unconfirmed, so confirm it with blocks_info and read `confirmed` before treating it as final.
+ *
+ */
+export interface ObjectOfObjectSm7CBkZQObjectWLN7TddMRI2TD0Lp {
+  errors?: ObjectWLN7TddM;
+  frontiers?: ObjectSm7CBkZQ;
   [k: string]: any;
 }
+export interface ObjectOfObjectWrpyYBUSWrpyYBUS {
+  blocks: ObjectWrpyYBUS;
+  [k: string]: any;
+}
+export interface ObjectOfString1ZlAN1WB9H42RZz2 {
+  started: String1ZlAN1WB;
+  [k: string]: any;
+}
+export type OneOfObjectOfString1ZlAN1WBZqiOl4ZtObjectOfStringDoaGddGAVIQJ5KESIyHjmKs1 = ObjectOfStringDoaGddGAVIQJ5KES | ObjectOfString1ZlAN1WBZqiOl4Zt;
 export interface ObjectOfQ2V1LnnW {
   [k: string]: any;
 }
@@ -97,16 +601,20 @@ export interface ObjectOfQ2V1LnnW {
  * Generated! Represents an alias to any of the provided schemas
  *
  */
-export type AnyOfStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAInteger2AHOqbcQStringDoaGddGAUnorderedSetOfStringDoaGddGADvj0XlFaObjectHAgrRKSzObjectOfStringDoaGddGACa8EbEFXObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAQvZx7DNZObjectOfOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxBooleanVyG3AEThOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxStringDoaGddGAOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxStringDoaGddGAStringDoaGddGAGNSf57PPUnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAXrJ0QBSLZpJh709UObjectOfStringDoaGddGAStringDoaGddGAA6BJBQrwObjectOfSetOfAnykhpArGaqStringDoaGddGAAJJ0BX3CObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGABooleanVyG3AEThStringDoaGddGAObjectIZgu6KjQStringDoaGddGAStringDoaGddGACdi3KcvWObjectOfObjectM3DCYHfDPpfMJsdeObjectOfStringDoaGddGAVIQJ5KESObjectOfQ2V1LnnW = StringDoaGddGA | Integer2AHOqbcQ | UnorderedSetOfStringDoaGddGADvj0XlFa | ObjectHAgrRKSz | ObjectOfStringDoaGddGACa8EbEFX | ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAQvZx7DNZ | ObjectOfOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxBooleanVyG3AEThOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxStringDoaGddGAOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxStringDoaGddGAStringDoaGddGAGNSf57PP | UnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAXrJ0QBSLZpJh709U | ObjectOfStringDoaGddGAStringDoaGddGAA6BJBQrw | ObjectOfSetOfAnykhpArGaqStringDoaGddGAAJJ0BX3C | ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGABooleanVyG3AEThStringDoaGddGAObjectIZgu6KjQStringDoaGddGAStringDoaGddGACdi3KcvW | ObjectOfObjectM3DCYHfDPpfMJsde | ObjectOfStringDoaGddGAVIQJ5KES | ObjectOfQ2V1LnnW;
-export type Version = () => Promise<ObjectOfStringDoaGddGACa8EbEFX>;
+export type AnyOfStringDj4X5WuPBooleanHXUrsVF3BooleanHypmFHQkBooleanWS3RrW0SBoolean8TiXyLsSStringDj4X5WuPIntegerX44JF2QNBooleanRFp1DjffBooleanLSQX1S6KIntegerFmbvneeqBooleanDMRhnYGvBooleanT1EfjvoCStringWIcCNnYTStringDj4X5WuPBooleanFWkjn0X9UnorderedSetOfStringDj4X5WuPZn6X8C6QBooleanAYhcVA2ZStringDj4X5WuPUnorderedSetOfStringDj4X5WuPclbCAPnOIntegerH6DnxQ1DStringCrPq71WTBooleanP5FJHJKwIntegerGteuOQQBBooleanAfhlTRWfBoolean8JDgwndiStringDj4X5WuPBooleanQHj8P06RBooleanVwc1CvPUUnorderedSetOfStringDj4X5WuPZn6X8C6QBooleanQHj8P06RBoolean8Kq4GA3XBooleanVwc1CvPUBooleanR0K1MOm3BooleanFlIR4Sj5UnorderedSetOfStringDj4X5WuPZn6X8C6QUnorderedSetOfStringDj4X5WuPZn6X8C6QInteger4Vdm2KJ2BooleanRFp1DjffBooleanLSQX1S6KBooleanYR7YfAlCBooleanT1EfjvoCStringWIcCNnYTStringLgMjIZkpBooleanZLs0PI9MObjectIZgu6KjQBoolean7ODk9QhOBooleanWmXjsmojStringV1BxFf5ZObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAStringQX4HF8LMStringDoaGddGAStringDoaGddGASEXrj8NpObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAQvZx7DNZObjectOfStringOhq3E2ViStringDoaGddGAStringJUbpM6ViStringJkagc7AcStringDoaGddGAStringDoaGddGAStringYPoaWPwCStringWtd49Ke2StringXlOXBOeHStringT5LN5K9PStringCEZ2CAMtStringL3ISYAWEStringOv9Ku8IyStringI0X9YnYlStringDoaGddGAStringMwNer8X6StringDoaGddGAHgLIphqiObjectOfOneOfObjectBd6DQSjJObjectWrpyYBUSUnorderedSetOfStringDoaGddGADvj0XlFaQ7Z5VdZJWrpyYBUSObjectOfStringDhLstFBzString3NIaRA0VYTXNW2NSObjectOfObjectC3V3RRZsObjectAbZMdPnf5An3SeRnObjectOfStringZYBWxaopString87Q5PkLhUnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringZcQbzM37StringDoaGddGAStringDoaGddGAStringCbZ6NzeYStringDoaGddGAStringSxBQH7U7StringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAString6M2H3ZC2StringDoaGddGAStringDoaGddGAStringDoaGddGAWrpyYBUSwrpyYBUSStringDoaGddGAWrpyYBUSObjectOfStringCSm9R3ChStringCif1X4GDStringDoaGddGAStringDoaGddGAStringDoaGddGAStringW8KZSlP1StringDoaGddGAAnyMpJIctevStringR1AFOEl0StringQA8ZsG7NStringMbsHjZkOStringIodF0WhROfbngHHHObjectOfUnorderedSetOfStringDoaGddGAC4M4NmatObject4MtmEcsWZPkjUiIMObjectOfObjectSm7CBkZQObjectWLN7TddMRI2TD0LpObjectOfObjectWrpyYBUSWrpyYBUSObjectOfString1ZlAN1WB9H42RZz2OneOfObjectOfString1ZlAN1WBZqiOl4ZtObjectOfStringDoaGddGAVIQJ5KESIyHjmKs1ObjectOfQ2V1LnnW = StringDj4X5WuP | BooleanHXUrsVF3 | BooleanHypmFHQk | BooleanWS3RrW0S | Boolean8TiXyLsS | IntegerX44JF2QN | BooleanRFp1Djff | BooleanLSQX1S6K | IntegerFmbvneeq | BooleanDMRhnYGv | BooleanT1EfjvoC | StringWIcCNnYT | BooleanFWkjn0X9 | UnorderedSetOfStringDj4X5WuPZn6X8C6Q | BooleanAYhcVA2Z | UnorderedSetOfStringDj4X5WuPclbCAPnO | IntegerH6DnxQ1D | StringCrPq71WT | BooleanP5FJHJKw | IntegerGteuOQQB | BooleanAfhlTRWf | Boolean8JDgwndi | BooleanQHj8P06R | BooleanVwc1CvPU | Boolean8Kq4GA3X | BooleanR0K1MOm3 | BooleanFlIR4Sj5 | Integer4Vdm2KJ2 | BooleanYR7YfAlC | StringLgMjIZkp | BooleanZLs0PI9M | ObjectIZgu6KjQ | Boolean7ODk9QhO | BooleanWmXjsmoj | StringV1BxFf5Z | ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAStringQX4HF8LMStringDoaGddGAStringDoaGddGASEXrj8Np | ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAQvZx7DNZ | ObjectOfStringOhq3E2ViStringDoaGddGAStringJUbpM6ViStringJkagc7AcStringDoaGddGAStringDoaGddGAStringYPoaWPwCStringWtd49Ke2StringXlOXBOeHStringT5LN5K9PStringCEZ2CAMtStringL3ISYAWEStringOv9Ku8IyStringI0X9YnYlStringDoaGddGAStringMwNer8X6StringDoaGddGAHgLIphqi | ObjectOfOneOfObjectBd6DQSjJObjectWrpyYBUSUnorderedSetOfStringDoaGddGADvj0XlFaQ7Z5VdZJWrpyYBUS | ObjectOfStringDhLstFBzString3NIaRA0VYTXNW2NS | ObjectOfObjectC3V3RRZsObjectAbZMdPnf5An3SeRn | ObjectOfStringZYBWxaopString87Q5PkLhUnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringZcQbzM37StringDoaGddGAStringDoaGddGAStringCbZ6NzeYStringDoaGddGAStringSxBQH7U7StringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAString6M2H3ZC2StringDoaGddGAStringDoaGddGAStringDoaGddGAWrpyYBUSwrpyYBUSStringDoaGddGAWrpyYBUS | ObjectOfStringCSm9R3ChStringCif1X4GDStringDoaGddGAStringDoaGddGAStringDoaGddGAStringW8KZSlP1StringDoaGddGAAnyMpJIctevStringR1AFOEl0StringQA8ZsG7NStringMbsHjZkOStringIodF0WhROfbngHHH | ObjectOfUnorderedSetOfStringDoaGddGAC4M4NmatObject4MtmEcsWZPkjUiIM | ObjectOfObjectSm7CBkZQObjectWLN7TddMRI2TD0Lp | ObjectOfObjectWrpyYBUSWrpyYBUS | ObjectOfString1ZlAN1WB9H42RZz2 | OneOfObjectOfString1ZlAN1WBZqiOl4ZtObjectOfStringDoaGddGAVIQJ5KESIyHjmKs1 | ObjectOfQ2V1LnnW;
+export type Version = () => Promise<ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAStringQX4HF8LMStringDoaGddGAStringDoaGddGASEXrj8Np>;
 export type BlockCount = () => Promise<ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAQvZx7DNZ>;
-export type AccountInfo = (account: StringDoaGddGA) => Promise<ObjectOfOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxBooleanVyG3AEThOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxStringDoaGddGAOneOfNullQu0Arl1FStringDoaGddGABsU3LTQxStringDoaGddGAStringDoaGddGAGNSf57PP>;
-export type Receivable = (account: StringDoaGddGA) => Promise<UnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGAXrJ0QBSLZpJh709U>;
-export type AccountBalance = (account: StringDoaGddGA) => Promise<ObjectOfStringDoaGddGAStringDoaGddGAA6BJBQrw>;
-export type AccountHistory = (account: StringDoaGddGA, count?: Integer2AHOqbcQ) => Promise<ObjectOfSetOfAnykhpArGaqStringDoaGddGAAJJ0BX3C>;
-export type BlockInfo = (hash: StringDoaGddGA) => Promise<ObjectOfStringDoaGddGAStringDoaGddGAStringDoaGddGABooleanVyG3AEThStringDoaGddGAObjectIZgu6KjQStringDoaGddGAStringDoaGddGACdi3KcvW>;
-export type BlocksInfo = (hashes: UnorderedSetOfStringDoaGddGADvj0XlFa) => Promise<ObjectOfObjectM3DCYHfDPpfMJsde>;
-export type Process = (block: ObjectHAgrRKSz) => Promise<ObjectOfStringDoaGddGAVIQJ5KES>;
+export type AccountInfo = (account: StringDj4X5WuP, include_confirmed?: BooleanHXUrsVF3, receivable?: BooleanHypmFHQk, representative?: BooleanWS3RrW0S, weight?: Boolean8TiXyLsS) => Promise<ObjectOfStringOhq3E2ViStringDoaGddGAStringJUbpM6ViStringJkagc7AcStringDoaGddGAStringDoaGddGAStringYPoaWPwCStringWtd49Ke2StringXlOXBOeHStringT5LN5K9PStringCEZ2CAMtStringL3ISYAWEStringOv9Ku8IyStringI0X9YnYlStringDoaGddGAStringMwNer8X6StringDoaGddGAHgLIphqi>;
+export type Receivable = (account: StringDj4X5WuP, count?: IntegerX44JF2QN, include_active?: BooleanRFp1Djff, include_only_confirmed?: BooleanLSQX1S6K, min_version?: IntegerFmbvneeq, sorting?: BooleanDMRhnYGv, source?: BooleanT1EfjvoC, threshold?: StringWIcCNnYT) => Promise<ObjectOfOneOfObjectBd6DQSjJObjectWrpyYBUSUnorderedSetOfStringDoaGddGADvj0XlFaQ7Z5VdZJWrpyYBUS>;
+export type AccountBalance = (account: StringDj4X5WuP, include_only_confirmed?: BooleanFWkjn0X9) => Promise<ObjectOfStringDhLstFBzString3NIaRA0VYTXNW2NS>;
+export type AccountsBalances = (accounts: UnorderedSetOfStringDj4X5WuPZn6X8C6Q, include_only_confirmed?: BooleanAYhcVA2Z) => Promise<ObjectOfObjectC3V3RRZsObjectAbZMdPnf5An3SeRn>;
+export type AccountHistory = (account: StringDj4X5WuP, account_filter?: UnorderedSetOfStringDj4X5WuPclbCAPnO, count?: IntegerH6DnxQ1D, head?: StringCrPq71WT, include_linked_account?: BooleanP5FJHJKw, offset?: IntegerGteuOQQB, raw?: BooleanAfhlTRWf, reverse?: Boolean8JDgwndi) => Promise<ObjectOfStringZYBWxaopString87Q5PkLhUnorderedSetOfObjectOfStringDoaGddGAStringDoaGddGAStringZcQbzM37StringDoaGddGAStringDoaGddGAStringCbZ6NzeYStringDoaGddGAStringSxBQH7U7StringDoaGddGAStringDoaGddGAStringDoaGddGAStringDoaGddGAString6M2H3ZC2StringDoaGddGAStringDoaGddGAStringDoaGddGAWrpyYBUSwrpyYBUSStringDoaGddGAWrpyYBUS>;
+export type BlockInfo = (hash: StringDj4X5WuP, include_linked_account?: BooleanQHj8P06R, json_block?: BooleanVwc1CvPU) => Promise<ObjectOfStringCSm9R3ChStringCif1X4GDStringDoaGddGAStringDoaGddGAStringDoaGddGAStringW8KZSlP1StringDoaGddGAAnyMpJIctevStringR1AFOEl0StringQA8ZsG7NStringMbsHjZkOStringIodF0WhROfbngHHH>;
+export type BlocksInfo = (hashes: UnorderedSetOfStringDj4X5WuPZn6X8C6Q, include_linked_account?: BooleanQHj8P06R, include_not_found?: Boolean8Kq4GA3X, json_block?: BooleanVwc1CvPU, receive_hash?: BooleanR0K1MOm3, source?: BooleanFlIR4Sj5) => Promise<ObjectOfUnorderedSetOfStringDoaGddGAC4M4NmatObject4MtmEcsWZPkjUiIM>;
+export type AccountsFrontiers = (accounts: UnorderedSetOfStringDj4X5WuPZn6X8C6Q) => Promise<ObjectOfObjectSm7CBkZQObjectWLN7TddMRI2TD0Lp>;
+export type AccountsReceivable = (accounts: UnorderedSetOfStringDj4X5WuPZn6X8C6Q, count?: Integer4Vdm2KJ2, include_active?: BooleanRFp1Djff, include_only_confirmed?: BooleanLSQX1S6K, sorting?: BooleanYR7YfAlC, source?: BooleanT1EfjvoC, threshold?: StringWIcCNnYT) => Promise<ObjectOfObjectWrpyYBUSWrpyYBUS>;
+export type BlockConfirm = (hash: StringLgMjIZkp) => Promise<ObjectOfString1ZlAN1WB9H42RZz2>;
+export type Process = (async?: BooleanZLs0PI9M, block: ObjectIZgu6KjQ, force?: Boolean7ODk9QhO, json_block?: BooleanWmXjsmoj, subtype?: StringV1BxFf5Z) => Promise<OneOfObjectOfString1ZlAN1WBZqiOl4ZtObjectOfStringDoaGddGAVIQJ5KESIyHjmKs1>;
 export type RpcDiscover = () => Promise<ObjectOfQ2V1LnnW>;
 
 export interface Options {
@@ -121,7 +629,7 @@ export interface Options {
 
 export class NanoGateway {
   public rpc: Client;
-  public static openrpcDocument: OpenRPC = {"components":{"errors":{"InvalidRequest":{"code":-32602,"message":"Invalid method parameters"},"MethodNotFound":{"code":-32601,"message":"Method not found"},"Unauthorized":{"code":-32001,"message":"Unauthorized"},"UpstreamFailure":{"code":-32000,"message":"Upstream request failed"},"UpstreamIndeterminate":{"code":-32002,"message":"Upstream outcome is indeterminate"},"UpstreamRejection":{"code":-32010,"message":"Request rejected by upstream"}},"schemas":{"AccountBalanceResult":{"properties":{"balance":{"type":"string"},"receivable":{"type":"string"}},"required":["balance","receivable"],"type":"object"},"AccountHistoryParams":{"properties":{"account":{"minLength":1,"type":"string"},"count":{"minimum":1,"type":"integer"}},"required":["account"],"type":"object"},"AccountHistoryResult":{"properties":{"account":{"type":"string"},"history":{"items":true,"type":"array"}},"required":["account","history"],"type":"object"},"AccountInfoParams":{"$ref":"#/components/schemas/AccountParams"},"AccountInfoResult":{"properties":{"balance":{"type":"string"},"confirmation_height":{"type":"string"},"confirmation_height_frontier":{"oneOf":[{"type":"string"},{"type":"null"}]},"confirmed_balance":{"type":"string"},"confirmed_frontier":{"oneOf":[{"type":"string"},{"type":"null"}]},"frontier":{"oneOf":[{"type":"string"},{"type":"null"}]},"open_block":{"oneOf":[{"type":"string"},{"type":"null"}]},"opened":{"type":"boolean"},"representative_block":{"oneOf":[{"type":"string"},{"type":"null"}]}},"required":["opened","frontier","open_block","representative_block","balance","confirmed_frontier","confirmed_balance","confirmation_height","confirmation_height_frontier"],"type":"object"},"AccountParams":{"properties":{"account":{"minLength":1,"type":"string"}},"required":["account"],"type":"object"},"BlockCountResult":{"properties":{"cemented":{"type":"string"},"count":{"type":"string"},"unchecked":{"type":"string"}},"required":["count","unchecked","cemented"],"type":"object"},"BlockInfoResult":{"properties":{"amount":{"type":"string"},"balance":{"type":"string"},"block":{"additionalProperties":true,"type":"object"},"block_account":{"type":"string"},"confirmed":{"type":"boolean"},"hash":{"type":"string"},"height":{"type":"string"},"subtype":{"type":"string"}},"required":["hash","block_account","amount","balance","height","subtype","confirmed","block"],"type":"object"},"BlockParams":{"properties":{"hash":{"minLength":1,"type":"string"}},"required":["hash"],"type":"object"},"BlocksInfoResult":{"properties":{"blocks":{"additionalProperties":{"$ref":"#/components/schemas/BlockInfoResult"},"type":"object"}},"required":["blocks"],"type":"object"},"BlocksParams":{"properties":{"hashes":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"}},"required":["hashes"],"type":"object"},"EmptyParams":{"additionalProperties":false,"properties":{},"type":"object"},"ProcessParams":{"properties":{"block":{"additionalProperties":true,"type":"object"}},"required":["block"],"type":"object"},"ProcessResult":{"properties":{"hash":{"type":"string"}},"required":["hash"],"type":"object"},"ReceivableEntry":{"properties":{"amount":{"type":"string"},"hash":{"type":"string"},"source":{"type":"string"}},"required":["source","hash","amount"],"type":"object"},"ReceivableResult":{"items":{"$ref":"#/components/schemas/ReceivableEntry"},"type":"array"},"VersionResult":{"properties":{"rpc_version":{"type":"string"}},"required":["rpc_version"],"type":"object"},"WorkGenerateParams":{"properties":{"difficulty":{"minLength":1,"type":"string"},"hash":{"minLength":1,"type":"string"}},"required":["hash","difficulty"],"type":"object"},"WorkGenerateResult":{"properties":{"difficulty":{"type":"string"},"hash":{"type":"string"},"multiplier":{"type":"string"},"work":{"type":"string"}},"required":["hash","work","difficulty","multiplier"],"type":"object"}}},"info":{"description":"JSON-RPC 2.0 adapter for a pinned Nano node profile.","title":"Nano Gateway","version":"0.1.0"},"methods":[{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"version","paramStructure":"by-name","params":[],"result":{"name":"result","schema":{"$ref":"#/components/schemas/VersionResult"}},"summary":"Read the upstream node version.","x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"block_count","paramStructure":"by-name","params":[],"result":{"name":"result","schema":{"$ref":"#/components/schemas/BlockCountResult"}},"summary":"Read upstream ledger block counts.","x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"account_info","paramStructure":"by-name","params":[{"name":"account","required":true,"schema":{"type":"string"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountInfoResult"}},"summary":"Read account frontier and representative state.","x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"receivable","paramStructure":"by-name","params":[{"name":"account","required":true,"schema":{"type":"string"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/ReceivableResult"}},"summary":"Read receivable blocks for an account.","x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"account_balance","paramStructure":"by-name","params":[{"name":"account","required":true,"schema":{"type":"string"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountBalanceResult"}},"summary":"Read an account balance.","x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"account_history","paramStructure":"by-name","params":[{"name":"account","required":true,"schema":{"type":"string"}},{"name":"count","required":false,"schema":{"type":"integer"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountHistoryResult"}},"summary":"Read account history.","x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"block_info","paramStructure":"by-name","params":[{"name":"hash","required":true,"schema":{"type":"string"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/BlockInfoResult"}},"summary":"Read block metadata.","x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"blocks_info","paramStructure":"by-name","params":[{"name":"hashes","required":true,"schema":{"items":{"type":"string"},"type":"array"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/BlocksInfoResult"}},"summary":"Read metadata for several blocks.","x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/Unauthorized"},{"$ref":"#/components/errors/UpstreamFailure"},{"$ref":"#/components/errors/UpstreamIndeterminate"},{"$ref":"#/components/errors/UpstreamRejection"}],"name":"process","paramStructure":"by-name","params":[{"name":"block","required":true,"schema":{"type":"object"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/ProcessResult"}},"summary":"Submit a precomputed block to the node.","x-nano-capability":{"browser_safe":true,"name":"process","requires":["authenticated"]},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"name":"rpc.discover","params":[],"result":{"name":"result","schema":{"additionalProperties":true,"properties":{},"type":"object"}},"summary":"Return this OpenRPC document."}],"openrpc":"1.3.2","servers":[{"name":"gateway","url":"https://gateway.invalid/rpc","variables":{"gatewayUrl":{"default":"https://gateway.invalid/rpc"}}}],"x-nano-artifact-sha256":"sha256:94549bd86a3dccc0ee23b92028de7e04aed30519a0eddc51b36242d5c4609f62","x-nano-common-authentication":{"required":true},"x-nano-profile":"nano-node/V28.2"};
+  public static openrpcDocument: OpenRPC = {"components":{"errors":{"InternalError":{"code":-32603,"message":"The gateway could not complete the call. The node may not have been reached, or its response did not match the pinned profile. The call may or may not have been processed."},"InvalidRequest":{"code":-32602,"message":"Invalid method parameters"},"MethodNotFound":{"code":-32601,"message":"Method not found"},"NodeError":{"code":-32000,"message":"The node reported an error. This code is reserved for node-reported errors, and the message is the node's own string unchanged."}},"schemas":{"AccountBalanceParams":{"properties":{"account":{"minLength":1,"type":"string"},"include_only_confirmed":{"default":true,"description":"Report only blocks whose confirmation height is up to date.","type":"boolean"}},"required":["account"],"type":"object"},"AccountBalanceResult":{"properties":{"balance":{"description":"Balance in raw. Confirmed only when include_only_confirmed is true.","type":"string"},"receivable":{"description":"Incoming amount not yet received, in raw.","type":"string"}},"required":["balance","receivable"],"type":"object"},"AccountHistoryParams":{"properties":{"account":{"minLength":1,"type":"string"},"account_filter":{"description":"Only return entries connected to these accounts.","items":{"minLength":1,"type":"string"},"type":"array"},"count":{"description":"Maximum number of entries. -1 returns the whole chain.","type":"integer"},"head":{"description":"Start from this block instead of the account's latest, and include it as the first entry. Use it to paginate.","maxLength":64,"minLength":64,"type":"string"},"include_linked_account":{"default":false,"description":"Add `linked_account` to each entry, or \"0\" when there is none or the block is pruned.","type":"boolean"},"offset":{"description":"Skip this many blocks, starting from head when given.","type":"integer"},"raw":{"default":false,"description":"Return full block content instead of a send/receive summary. Required to see change and epoch blocks, which the summary skips.","type":"boolean"},"reverse":{"default":false,"description":"Walk forward from head toward the frontier instead of backward. The response reports `next` in place of `previous`.","type":"boolean"}},"required":["account"],"type":"object"},"AccountHistoryResult":{"properties":{"account":{"type":"string"},"history":{"items":{"$ref":"#/components/schemas/HistoryEntry"},"type":"array"},"next":{"description":"Present in place of `previous` when `reverse` was requested.","type":"string"},"previous":{"description":"Present only when `count` truncated the result: the hash to pass as the next `head`.","type":"string"}},"required":["account","history"],"type":"object"},"AccountInfoParams":{"properties":{"account":{"minLength":1,"type":"string"},"include_confirmed":{"default":false,"description":"Add the confirmed_ fields. Without it the response carries no confirmed_* fields.","type":"boolean"},"receivable":{"default":false,"description":"Add the receivable total, plus confirmed_receivable when include_confirmed is also set.","type":"boolean"},"representative":{"default":false,"description":"Add the representative account.","type":"boolean"},"weight":{"default":false,"description":"Add the account's voting weight.","type":"boolean"}},"required":["account"],"type":"object"},"AccountInfoResult":{"description":"Fields beyond this set appear only when the matching request parameter is set.","properties":{"account_version":{"type":"string"},"balance":{"description":"Balance at frontier, in raw. It can include unconfirmed state.","type":"string"},"block_count":{"type":"string"},"confirmation_height":{"description":"Cemented blocks on the account chain.","type":"string"},"confirmation_height_frontier":{"description":"The block hash at confirmation_height.","type":"string"},"confirmed_balance":{"description":"Present when `include_confirmed` was requested.","type":"string"},"confirmed_frontier":{"description":"Present when `include_confirmed` was requested. Confirm a frontier with blocks_info before treating it as final.","type":"string"},"confirmed_height":{"description":"Present when `include_confirmed` was requested. Same value as confirmation_height.","type":"string"},"confirmed_receivable":{"description":"Present when both `receivable` and `include_confirmed` were requested.","type":"string"},"confirmed_representative":{"description":"Present when both `representative` and `include_confirmed` were requested.","type":"string"},"frontier":{"description":"Current frontier hash. It can be ahead of cemented state.","type":"string"},"modified_timestamp":{"type":"string"},"open_block":{"type":"string"},"receivable":{"description":"Present when `receivable` was requested.","type":"string"},"representative":{"description":"Present when `representative` was requested.","type":"string"},"representative_block":{"type":"string"},"weight":{"description":"Present when `weight` was requested.","type":"string"}},"required":["frontier","open_block","representative_block","balance","modified_timestamp","block_count","account_version"],"type":"object"},"AccountsBalancesResult":{"description":"Both maps are optional; the node omits one when no entry applies to it. An account absent from the ledger reports a zero balance and zero receivable rather than an error.","properties":{"balances":{"additionalProperties":{"$ref":"#/components/schemas/AccountBalanceResult"},"description":"One entry per requested account. This is not an aggregate.","type":"object"},"errors":{"additionalProperties":{"type":"string"},"description":"Per-account error message.","type":"object"}},"type":"object"},"AccountsFrontiersParams":{"properties":{"accounts":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"}},"required":["accounts"],"type":"object"},"AccountsFrontiersResult":{"description":"Both maps are optional. The node omits `frontiers` when every requested account failed and omits `errors` when none did. A head block can be unconfirmed, so confirm it with blocks_info and read `confirmed` before treating it as final.","properties":{"errors":{"additionalProperties":{"type":"string"},"description":"Account to the node's message for that account.","type":"object"},"frontiers":{"additionalProperties":{"type":"string"},"description":"Account to head block hash.","type":"object"}},"type":"object"},"AccountsParams":{"properties":{"accounts":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"},"include_only_confirmed":{"default":true,"description":"Only count blocks whose confirmation height is up to date.","type":"boolean"}},"required":["accounts"],"type":"object"},"AccountsReceivableParams":{"properties":{"accounts":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"},"count":{"description":"Maximum number of blocks to return per account.","type":"integer"},"include_active":{"default":false,"description":"Include blocks without a finished confirmation.","type":"boolean"},"include_only_confirmed":{"default":true,"description":"Only return blocks whose confirmation height is up to date.","type":"boolean"},"sorting":{"default":false,"description":"Sort each account's blocks by amount, descending.","type":"boolean"},"source":{"default":false,"description":"Include the sending account with each block. Selects the hash-to-object result shape.","type":"boolean"},"threshold":{"description":"Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape.","type":"string"}},"required":["accounts"],"type":"object"},"AccountsReceivableResult":{"properties":{"blocks":{"additionalProperties":{"$ref":"#/components/schemas/ReceivableBlocks"},"description":"Account to that account's receivable blocks.","type":"object"}},"required":["blocks"],"type":"object"},"BlockConfirmParams":{"properties":{"hash":{"description":"The block to ask online representatives about.","minLength":1,"type":"string"}},"required":["hash"],"type":"object"},"BlockConfirmResult":{"properties":{"started":{"const":"1","type":"string"}},"required":["started"],"type":"object"},"BlockCountResult":{"properties":{"cemented":{"type":"string"},"count":{"type":"string"},"unchecked":{"type":"string"}},"required":["count","unchecked","cemented"],"type":"object"},"BlockInfoResult":{"description":"`subtype` is present for state blocks only, and is the source of truth for a state block's kind.","properties":{"amount":{"description":"Block amount in raw.","type":"string"},"balance":{"description":"Account balance after this block, in raw.","type":"string"},"block_account":{"description":"Account that owns the block.","type":"string"},"confirmed":{"description":"\"true\" only when the node reports the block cemented.","type":"string"},"contents":{"description":"Block content. A JSON string unless `json_block` was requested."},"height":{"type":"string"},"linked_account":{"description":"Present when include_linked_account was requested; \"0\" when there is none.","type":"string"},"local_timestamp":{"type":"string"},"receive_hash":{"type":"string"},"source_account":{"type":"string"},"subtype":{"enum":["send","receive","change","epoch"],"type":"string"},"successor":{"description":"The block that superseded this one.","type":"string"}},"required":["block_account","amount","balance","height","local_timestamp","confirmed"],"type":"object"},"BlockParams":{"properties":{"hash":{"minLength":1,"type":"string"},"include_linked_account":{"default":false,"description":"Add `linked_account`, or \"0\" when there is none or the block is pruned.","type":"boolean"},"json_block":{"default":false,"description":"Return `contents` as a JSON subtree instead of a JSON string.","type":"boolean"}},"required":["hash"],"type":"object"},"BlocksInfoResult":{"properties":{"blocks":{"additionalProperties":{"$ref":"#/components/schemas/BlockInfoResult"},"type":"object"},"blocks_not_found":{"description":"Present when include_not_found was requested.","items":{"type":"string"},"type":"array"}},"required":["blocks"],"type":"object"},"BlocksParams":{"properties":{"hashes":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"},"include_linked_account":{"default":false,"description":"Add `linked_account`, or \"0\" when there is none or the block is pruned.","type":"boolean"},"include_not_found":{"default":false,"description":"Report unknown hashes in `blocks_not_found` instead of failing.","type":"boolean"},"json_block":{"default":false,"description":"Return `contents` as a JSON subtree instead of a JSON string.","type":"boolean"},"receive_hash":{"default":false,"description":"For send blocks, add the matching receive block hash.","type":"boolean"},"source":{"default":false,"description":"Add `source_account` for receive and open blocks, and \"0\" for send and change blocks.","type":"boolean"}},"required":["hashes"],"type":"object"},"EmptyParams":{"additionalProperties":false,"properties":{},"type":"object"},"HistoryEntry":{"description":"Without `raw`, `type` is `send` or `receive` and change and epoch blocks are skipped. With `raw`, it is the block type and every block field is present. For an open block in raw mode, `account` is the source block's account.","properties":{"account":{"type":"string"},"amount":{"type":"string"},"balance":{"type":"string"},"confirmed":{"description":"\"true\" when the node reports the entry cemented.","type":"string"},"hash":{"type":"string"},"height":{"type":"string"},"link":{"type":"string"},"link_as_account":{"type":"string"},"linked_account":{"description":"Present when include_linked_account was requested.","type":"string"},"local_timestamp":{"type":"string"},"previous":{"description":"Hash of the preceding block on the account chain.","type":"string"},"representative":{"type":"string"},"signature":{"type":"string"},"subtype":{"description":"State blocks only. The source of truth for the block's kind.","type":"string"},"type":{"type":"string"},"work":{"type":"string"}},"required":["type","account","amount","hash"],"type":"object"},"ProcessParams":{"properties":{"async":{"default":false,"description":"Queue the block and return `started` immediately instead of waiting. The outcome arrives on the `new_unconfirmed_block` topic.","type":"boolean"},"block":{"additionalProperties":true,"type":"object"},"force":{"default":false,"description":"Force fork resolution when the block is not accepted as the fork.","type":"boolean"},"json_block":{"default":false,"description":"Send `block` as a JSON subtree instead of a JSON string.","type":"boolean"},"subtype":{"description":"Extra check on the block's intent. Strongly recommended, and required in a future node version.","enum":["send","receive","open","change","epoch"],"type":"string"}},"required":["block"],"type":"object"},"ProcessResult":{"oneOf":[{"properties":{"hash":{"type":"string"}},"required":["hash"],"type":"object"},{"description":"Returned when `async` was requested. The block was queued, not processed; the outcome arrives on the `new_unconfirmed_block` topic.","properties":{"started":{"const":"1","type":"string"}},"required":["started"],"type":"object"}]},"ReceivableBlocks":{"description":"The node selects one of three shapes from the request parameters: an array of hashes by default, hash to amount with `threshold`, and hash to amount and source account with `source`.","oneOf":[{"items":{"type":"string"},"type":"array"},{"additionalProperties":{"type":"string"},"type":"object"},{"additionalProperties":{"$ref":"#/components/schemas/ReceivableSource"},"type":"object"}]},"ReceivableParams":{"properties":{"account":{"minLength":1,"type":"string"},"count":{"description":"Maximum number of blocks to return.","type":"integer"},"include_active":{"default":false,"description":"Include blocks without a finished confirmation.","type":"boolean"},"include_only_confirmed":{"default":true,"description":"Only return blocks whose confirmation height is up to date.","type":"boolean"},"min_version":{"description":"Only return blocks that this version (epoch) or later can pocket.","type":"integer"},"sorting":{"default":false,"description":"Sort blocks by amount, descending.","type":"boolean"},"source":{"default":false,"description":"Include the sending account with each block. Selects the hash-to-object result shape.","type":"boolean"},"threshold":{"description":"Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape.","type":"string"}},"required":["account"],"type":"object"},"ReceivableResult":{"properties":{"blocks":{"$ref":"#/components/schemas/ReceivableBlocks"}},"required":["blocks"],"type":"object"},"ReceivableSource":{"properties":{"amount":{"type":"string"},"source":{"type":"string"}},"required":["amount","source"],"type":"object"},"VersionResult":{"properties":{"build_info":{"type":"string"},"network":{"type":"string"},"network_identifier":{"description":"Hash of the genesis open block.","type":"string"},"node_vendor":{"type":"string"},"protocol_version":{"type":"string"},"rpc_version":{"type":"string"},"store_vendor":{"type":"string"},"store_version":{"type":"string"}},"required":["rpc_version"],"type":"object"}}},"info":{"description":"JSON-RPC 2.0 adapter for a pinned Nano node profile.","title":"Nano Gateway","version":"0.1.0"},"methods":[{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"version","paramStructure":"by-name","params":[],"result":{"name":"result","schema":{"$ref":"#/components/schemas/VersionResult"}},"summary":"Read the upstream node version.","x-nano-params-schema":{"$ref":"#/components/schemas/EmptyParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"block_count","paramStructure":"by-name","params":[],"result":{"name":"result","schema":{"$ref":"#/components/schemas/BlockCountResult"}},"summary":"Read upstream ledger block counts.","x-nano-params-schema":{"$ref":"#/components/schemas/EmptyParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"account_info","paramStructure":"by-name","params":[{"name":"account","required":true,"schema":{"minLength":1,"type":"string"}},{"name":"include_confirmed","required":false,"schema":{"default":false,"description":"Add the confirmed_ fields. Without it the response carries no confirmed_* fields.","type":"boolean"}},{"name":"receivable","required":false,"schema":{"default":false,"description":"Add the receivable total, plus confirmed_receivable when include_confirmed is also set.","type":"boolean"}},{"name":"representative","required":false,"schema":{"default":false,"description":"Add the representative account.","type":"boolean"}},{"name":"weight","required":false,"schema":{"default":false,"description":"Add the account's voting weight.","type":"boolean"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountInfoResult"}},"summary":"Read current and confirmed frontier state for one account.","x-nano-params-schema":{"$ref":"#/components/schemas/AccountInfoParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"receivable","paramStructure":"by-name","params":[{"name":"account","required":true,"schema":{"minLength":1,"type":"string"}},{"name":"count","required":false,"schema":{"description":"Maximum number of blocks to return.","type":"integer"}},{"name":"include_active","required":false,"schema":{"default":false,"description":"Include blocks without a finished confirmation.","type":"boolean"}},{"name":"include_only_confirmed","required":false,"schema":{"default":true,"description":"Only return blocks whose confirmation height is up to date.","type":"boolean"}},{"name":"min_version","required":false,"schema":{"description":"Only return blocks that this version (epoch) or later can pocket.","type":"integer"}},{"name":"sorting","required":false,"schema":{"default":false,"description":"Sort blocks by amount, descending.","type":"boolean"}},{"name":"source","required":false,"schema":{"default":false,"description":"Include the sending account with each block. Selects the hash-to-object result shape.","type":"boolean"}},{"name":"threshold","required":false,"schema":{"description":"Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape.","type":"string"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/ReceivableResult"}},"summary":"Read receivable blocks for an account.","x-nano-params-schema":{"$ref":"#/components/schemas/ReceivableParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"account_balance","paramStructure":"by-name","params":[{"name":"account","required":true,"schema":{"minLength":1,"type":"string"}},{"name":"include_only_confirmed","required":false,"schema":{"default":true,"description":"Report only blocks whose confirmation height is up to date.","type":"boolean"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountBalanceResult"}},"summary":"Read balance and receivable state for one account.","x-nano-params-schema":{"$ref":"#/components/schemas/AccountBalanceParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"accounts_balances","paramStructure":"by-name","params":[{"name":"accounts","required":true,"schema":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"}},{"name":"include_only_confirmed","required":false,"schema":{"default":true,"description":"Only count blocks whose confirmation height is up to date.","type":"boolean"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountsBalancesResult"}},"summary":"Read balances and receivables for several accounts.","x-nano-params-schema":{"$ref":"#/components/schemas/AccountsParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"account_history","paramStructure":"by-name","params":[{"name":"account","required":true,"schema":{"minLength":1,"type":"string"}},{"name":"account_filter","required":false,"schema":{"description":"Only return entries connected to these accounts.","items":{"minLength":1,"type":"string"},"type":"array"}},{"name":"count","required":false,"schema":{"description":"Maximum number of entries. -1 returns the whole chain.","type":"integer"}},{"name":"head","required":false,"schema":{"description":"Start from this block instead of the account's latest, and include it as the first entry. Use it to paginate.","maxLength":64,"minLength":64,"type":"string"}},{"name":"include_linked_account","required":false,"schema":{"default":false,"description":"Add `linked_account` to each entry, or \"0\" when there is none or the block is pruned.","type":"boolean"}},{"name":"offset","required":false,"schema":{"description":"Skip this many blocks, starting from head when given.","type":"integer"}},{"name":"raw","required":false,"schema":{"default":false,"description":"Return full block content instead of a send/receive summary. Required to see change and epoch blocks, which the summary skips.","type":"boolean"}},{"name":"reverse","required":false,"schema":{"default":false,"description":"Walk forward from head toward the frontier instead of backward. The response reports `next` in place of `previous`.","type":"boolean"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountHistoryResult"}},"summary":"Read account history.","x-nano-params-schema":{"$ref":"#/components/schemas/AccountHistoryParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"block_info","paramStructure":"by-name","params":[{"name":"hash","required":true,"schema":{"minLength":1,"type":"string"}},{"name":"include_linked_account","required":false,"schema":{"default":false,"description":"Add `linked_account`, or \"0\" when there is none or the block is pruned.","type":"boolean"}},{"name":"json_block","required":false,"schema":{"default":false,"description":"Return `contents` as a JSON subtree instead of a JSON string.","type":"boolean"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/BlockInfoResult"}},"summary":"Read block metadata and whether the block is cemented.","x-nano-params-schema":{"$ref":"#/components/schemas/BlockParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"blocks_info","paramStructure":"by-name","params":[{"name":"hashes","required":true,"schema":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"}},{"name":"include_linked_account","required":false,"schema":{"default":false,"description":"Add `linked_account`, or \"0\" when there is none or the block is pruned.","type":"boolean"}},{"name":"include_not_found","required":false,"schema":{"default":false,"description":"Report unknown hashes in `blocks_not_found` instead of failing.","type":"boolean"}},{"name":"json_block","required":false,"schema":{"default":false,"description":"Return `contents` as a JSON subtree instead of a JSON string.","type":"boolean"}},{"name":"receive_hash","required":false,"schema":{"default":false,"description":"For send blocks, add the matching receive block hash.","type":"boolean"}},{"name":"source","required":false,"schema":{"default":false,"description":"Add `source_account` for receive and open blocks, and \"0\" for send and change blocks.","type":"boolean"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/BlocksInfoResult"}},"summary":"Read metadata for several blocks.","x-nano-params-schema":{"$ref":"#/components/schemas/BlocksParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"accounts_frontiers","paramStructure":"by-name","params":[{"name":"accounts","required":true,"schema":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountsFrontiersResult"}},"summary":"Read the head block hash for each account.","x-nano-params-schema":{"$ref":"#/components/schemas/AccountsFrontiersParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"accounts_receivable","paramStructure":"by-name","params":[{"name":"accounts","required":true,"schema":{"items":{"minLength":1,"type":"string"},"minItems":1,"type":"array"}},{"name":"count","required":false,"schema":{"description":"Maximum number of blocks to return per account.","type":"integer"}},{"name":"include_active","required":false,"schema":{"default":false,"description":"Include blocks without a finished confirmation.","type":"boolean"}},{"name":"include_only_confirmed","required":false,"schema":{"default":true,"description":"Only return blocks whose confirmation height is up to date.","type":"boolean"}},{"name":"sorting","required":false,"schema":{"default":false,"description":"Sort each account's blocks by amount, descending.","type":"boolean"}},{"name":"source","required":false,"schema":{"default":false,"description":"Include the sending account with each block. Selects the hash-to-object result shape.","type":"boolean"}},{"name":"threshold","required":false,"schema":{"description":"Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape.","type":"string"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/AccountsReceivableResult"}},"summary":"Read receivable blocks for several accounts.","x-nano-params-schema":{"$ref":"#/components/schemas/AccountsReceivableParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"block_confirm","paramStructure":"by-name","params":[{"name":"hash","required":true,"schema":{"description":"The block to ask online representatives about.","minLength":1,"type":"string"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/BlockConfirmResult"}},"summary":"Request confirmation for a block from online representatives.","x-nano-params-schema":{"$ref":"#/components/schemas/BlockConfirmParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"errors":[{"$ref":"#/components/errors/InvalidRequest"},{"$ref":"#/components/errors/MethodNotFound"},{"$ref":"#/components/errors/NodeError"},{"$ref":"#/components/errors/InternalError"}],"name":"process","paramStructure":"by-name","params":[{"name":"async","required":false,"schema":{"default":false,"description":"Queue the block and return `started` immediately instead of waiting. The outcome arrives on the `new_unconfirmed_block` topic.","type":"boolean"}},{"name":"block","required":true,"schema":{"additionalProperties":true,"type":"object"}},{"name":"force","required":false,"schema":{"default":false,"description":"Force fork resolution when the block is not accepted as the fork.","type":"boolean"}},{"name":"json_block","required":false,"schema":{"default":false,"description":"Send `block` as a JSON subtree instead of a JSON string.","type":"boolean"}},{"name":"subtype","required":false,"schema":{"description":"Extra check on the block's intent. Strongly recommended, and required in a future node version.","enum":["send","receive","open","change","epoch"],"type":"string"}}],"result":{"name":"result","schema":{"$ref":"#/components/schemas/ProcessResult"}},"summary":"Submit a precomputed block and return its hash.","x-nano-capability":{"browser_safe":true,"name":"process","requires":["authenticated"]},"x-nano-params-schema":{"$ref":"#/components/schemas/ProcessParams"},"x-nano-schema-provenance":"profiles/nano-node-v28.2.yaml"},{"name":"rpc.discover","params":[],"result":{"name":"result","schema":{"additionalProperties":true,"properties":{},"type":"object"}},"summary":"Return the OpenRPC document."}],"openrpc":"1.3.2","servers":[{"name":"gateway","url":"https://gateway.invalid/rpc","variables":{"gatewayUrl":{"default":"https://gateway.invalid/rpc"}}}],"x-nano-artifact-sha256":"sha256:d443728b3819737e4e9ec2e7a5113a3bb27c5d65228fc11d93bb8ff9b7226b79","x-nano-common-authentication":{"required":true},"x-nano-profile":"nano-node/V28.2"};
   public dereffedDocument: OpenRPC | undefined;
   public transport:
     | HTTPTransport
@@ -304,7 +812,7 @@ export class NanoGateway {
   }
 
   /**
-   * Read account frontier and representative state.
+   * Read current and confirmed frontier state for one account.
    */
   // tslint:disable-next-line:max-line-length
   public account_info: AccountInfo = (...params) => {
@@ -320,11 +828,19 @@ export class NanoGateway {
   }
 
   /**
-   * Read an account balance.
+   * Read balance and receivable state for one account.
    */
   // tslint:disable-next-line:max-line-length
   public account_balance: AccountBalance = (...params) => {
     return this.request("account_balance", params);
+  }
+
+  /**
+   * Read balances and receivables for several accounts.
+   */
+  // tslint:disable-next-line:max-line-length
+  public accounts_balances: AccountsBalances = (...params) => {
+    return this.request("accounts_balances", params);
   }
 
   /**
@@ -336,7 +852,7 @@ export class NanoGateway {
   }
 
   /**
-   * Read block metadata.
+   * Read block metadata and whether the block is cemented.
    */
   // tslint:disable-next-line:max-line-length
   public block_info: BlockInfo = (...params) => {
@@ -352,7 +868,31 @@ export class NanoGateway {
   }
 
   /**
-   * Submit a precomputed block to the node.
+   * Read the head block hash for each account.
+   */
+  // tslint:disable-next-line:max-line-length
+  public accounts_frontiers: AccountsFrontiers = (...params) => {
+    return this.request("accounts_frontiers", params);
+  }
+
+  /**
+   * Read receivable blocks for several accounts.
+   */
+  // tslint:disable-next-line:max-line-length
+  public accounts_receivable: AccountsReceivable = (...params) => {
+    return this.request("accounts_receivable", params);
+  }
+
+  /**
+   * Request confirmation for a block from online representatives.
+   */
+  // tslint:disable-next-line:max-line-length
+  public block_confirm: BlockConfirm = (...params) => {
+    return this.request("block_confirm", params);
+  }
+
+  /**
+   * Submit a precomputed block and return its hash.
    */
   // tslint:disable-next-line:max-line-length
   public process: Process = (...params) => {
@@ -360,7 +900,7 @@ export class NanoGateway {
   }
 
   /**
-   * Return this OpenRPC document.
+   * Return the OpenRPC document.
    */
   // tslint:disable-next-line:max-line-length
   public ["rpc.discover"]: RpcDiscover = (...params) => {
