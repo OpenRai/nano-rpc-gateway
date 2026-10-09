@@ -607,6 +607,49 @@ async fn node_reported_error_is_verbatim_under_one_fixed_code() {
 }
 
 #[tokio::test]
+async fn gateway_origin_failures_use_the_standard_internal_error_code() {
+    // A call that never reaches the node, or whose upstream reply does not match the
+    // pinned profile, is gateway-authored. It uses the standard JSON-RPC internal
+    // error code (-32603), never the node's reserved -32000.
+    let mismatch_router = Router::new().route("/", post(|| async { Json(json!({"frontier": 7})) }));
+    let mismatch_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mismatch stub");
+    let mismatch_address = mismatch_listener.local_addr().expect("mismatch address");
+    tokio::spawn(async move {
+        axum::serve(mismatch_listener, mismatch_router)
+            .await
+            .expect("mismatch server")
+    });
+    let mismatch = rpc(
+        AppState::new(test_config(format!("http://{mismatch_address}"))).expect("state"),
+        r#"{"jsonrpc":"2.0","method":"account_info","params":{"account":"nano_test"},"id":1}"#,
+    )
+    .await;
+    assert_eq!(mismatch["error"]["code"], -32603);
+    assert_eq!(
+        mismatch["error"]["message"],
+        "Upstream result does not match the selected profile schema"
+    );
+    assert!(mismatch["error"].get("data").is_none());
+
+    // A refused upstream never reaches the node either.
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("reserve port");
+    let refused = listener.local_addr().expect("refused address");
+    drop(listener);
+    let response = rpc(
+        AppState::new(test_config(format!("http://{refused}"))).expect("state"),
+        r#"{"jsonrpc":"2.0","method":"account_info","params":{"account":"nano_test"},"id":2}"#,
+    )
+    .await;
+    assert_eq!(response["error"]["code"], -32603);
+    assert_eq!(response["error"]["message"], "Upstream unavailable");
+    assert!(response["error"].get("data").is_none());
+}
+
+#[tokio::test]
 async fn explicit_null_id_is_preserved_as_jsonrpc_null() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let response = rpc(

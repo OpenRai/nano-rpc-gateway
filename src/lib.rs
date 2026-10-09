@@ -335,9 +335,15 @@ pub enum GatewayError {
 }
 
 /// Translation-layer item 2: one fixed code for every error the node itself reported.
-/// Failures that never reach the node use the standard JSON-RPC codes, so this value
-/// can be reserved exclusively for the node's own `error` string.
+/// The inner string is the node's `error` value verbatim, so this code is reserved
+/// exclusively for it and never carries a gateway-authored message.
 pub const NODE_ERROR_CODE: i32 = -32000;
+
+/// Translation-layer item 2: a failure that never reached the node, or that the
+/// gateway detected on an upstream response, uses the standard JSON-RPC internal
+/// error code rather than the node's reserved space. The message is the gateway's
+/// own, never the node's error string.
+pub const GATEWAY_ERROR_CODE: i32 = -32603;
 
 /// A rejection that never reached the node, so it cannot be a JSON-RPC error body.
 ///
@@ -1170,16 +1176,24 @@ fn build_openrpc_document(
             "result": {"name": "result", "schema": {"type": "object", "properties": {}, "additionalProperties": true}}
         }));
     }
+    // Errors live under components, where the OpenRPC meta-schema expects them and
+    // where each method's `#/components/errors/...` reference resolves.
+    let mut components = serde_json::Map::new();
+    components.insert("schemas".into(), Value::Object(component_schemas()));
+    components.insert(
+        "errors".into(),
+        json!({
+            "InvalidRequest": {"code": -32602, "message": "Invalid method parameters"},
+            "MethodNotFound": {"code": -32601, "message": "Method not found"},
+            "NodeError": {"code": -32000, "message": "The node reported an error. This code is reserved for node-reported errors, and the message is the node's own string unchanged."},
+            "InternalError": {"code": -32603, "message": "The gateway could not complete the call. The node may not have been reached, or its response did not match the pinned profile. The call may or may not have been processed."}
+        }),
+    );
     json!({
         "openrpc": "1.3.2", "info": {"title":"Nano Gateway", "version":"0.1.0", "description":"JSON-RPC 2.0 adapter for a pinned Nano node profile."},
         "servers": [{"name":"gateway", "url":gateway_url, "variables":{"gatewayUrl":{"default":gateway_url}}}],
         "methods": methods,
-        "components": {"schemas": component_schemas()}, "errors": {
-            "InvalidRequest": {"code": -32602, "message": "Invalid method parameters"},
-            "MethodNotFound": {"code": -32601, "message": "Method not found"},
-            "NodeError": {"code": -32000, "message": "The node reported an error. This is the only code the gateway uses for node-reported errors, and the message is the node's own string unchanged."},
-            "UpstreamUnavailable": {"code": -32000, "message": "The node could not be reached. The call may or may not have been processed."}
-        }, "x-nano-profile": profile
+        "components": Value::Object(components), "x-nano-profile": profile
     })
 }
 
@@ -1201,7 +1215,7 @@ fn openrpc_method(method: MethodSpec) -> Value {
             {"$ref":"#/components/errors/InvalidRequest"},
             {"$ref":"#/components/errors/MethodNotFound"},
             {"$ref":"#/components/errors/NodeError"},
-            {"$ref":"#/components/errors/UpstreamUnavailable"}
+            {"$ref":"#/components/errors/InternalError"}
         ]
     });
     if method.name == "process" {
@@ -2040,15 +2054,18 @@ impl AppState {
                 if validate_result(spec.name, &result) {
                     Ok(RpcResponse::ok(request.id, result))
                 } else {
+                    // The node answered, but not in the shape the profile pins. That is
+                    // a gateway-detected failure, not a node error string, so it uses
+                    // the gateway code.
                     Ok(RpcResponse::err(
                         request.id,
-                        -32000,
+                        GATEWAY_ERROR_CODE,
                         "Upstream result does not match the selected profile schema",
                     ))
                 }
             }
             // Translation-layer item 2: the node reported this error, so its string is
-            // the JSON-RPC message verbatim, under one fixed code.
+            // the JSON-RPC message verbatim, under the code reserved for it.
             Err(GatewayError::NodeRejected(reason))
             | Err(GatewayError::NodeRateLimited(reason)) => {
                 Ok(RpcResponse::err(request.id, NODE_ERROR_CODE, reason))
@@ -2059,17 +2076,27 @@ impl AppState {
                 // stable public error contract.
                 Ok(RpcResponse::err(
                     request.id,
-                    -32000,
+                    GATEWAY_ERROR_CODE,
                     "Upstream request failed",
                 ))
             }
             Err(GatewayError::UpstreamUnavailable(_)) | Err(GatewayError::UpstreamTransport(_)) => {
-                Ok(RpcResponse::err(request.id, -32000, "Upstream unavailable"))
+                Ok(RpcResponse::err(
+                    request.id,
+                    GATEWAY_ERROR_CODE,
+                    "Upstream unavailable",
+                ))
             }
             Err(GatewayError::InvalidRequest(message)) => {
                 Ok(RpcResponse::err(request.id, -32602, message))
             }
-            Err(error) => Ok(RpcResponse::err(request.id, -32000, error.to_string())),
+            // Any other gateway-authored failure stays in the gateway's own code space
+            // with a fixed message, so no internal detail reaches the caller.
+            Err(_) => Ok(RpcResponse::err(
+                request.id,
+                GATEWAY_ERROR_CODE,
+                "Internal error",
+            )),
         }
     }
     /// Operator guards that refuse a call before it reaches the node. Returning an
