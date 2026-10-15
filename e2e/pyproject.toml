@@ -1,7 +1,7 @@
 [project]
 name = "nano-rpc-gateway-e2e"
 version = "0.1.0"
-description = "Opt-in live E2E tests for the Nano RPC gateway"
+description = "Opt-in live E2E tests for the Nano Gateway JSON-RPC API"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.26.0,<0.27.0",
@@ -23,7 +23,7 @@ testpaths = ["tests"]
 addopts = "-ra"
 asyncio_mode = "auto"
 markers = [
-    "live: requires a reachable gateway and Nano RPC upstream",
+    "live: requires a reachable gateway and Nano node custom JSON RPC upstream",
     "mutation: submits a live wallet transaction; requires explicit opt-in",
 ]
 

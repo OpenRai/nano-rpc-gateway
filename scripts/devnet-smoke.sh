@@ -46,7 +46,7 @@ for _ in $(seq 1 "$attempts"); do
   sleep 2
 done
 if [[ "$account_ready" != 1 ]]; then
-  echo "gateway did not reach the Nano RPC upstream after ${attempts} attempts" >&2
+  echo "gateway did not reach the Nano node custom JSON RPC upstream after ${attempts} attempts" >&2
   exit 1
 fi
 

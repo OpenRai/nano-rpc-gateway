@@ -1,4 +1,4 @@
-# Nano RPC Gateway: exploratory software design
+# Nano Gateway: exploratory software design
 
 Status: working design; the v0.1 sidecar implementation is present, but its
 external contract remains subject to the evidence and compatibility gates below
@@ -33,8 +33,8 @@ Readers do not need to consume the entire document before acting.
 
 ## 2. One-minute orientation
 
-Nano RPC Gateway is a standalone, sidecar-deployable integration gateway for
-Nano nodes. It aims to give modern clients one coherent HTTP surface:
+The gateway is a standalone, sidecar-deployable integration gateway for Nano
+nodes. It gives clients a JSON-RPC 2.0 API and an SSE event stream:
 
 - standards-conforming JSON-RPC 2.0 requests and responses;
 - standard `rpc.discover` discovery backed by an OpenRPC document;
@@ -52,19 +52,19 @@ Integrator or developer
   ├── rpc.discover / OpenRPC
   └── Server-Sent Events
                  │
-          Nano RPC Gateway
+          Nano Gateway
                  │
-  ├── native Nano action RPC over HTTP or IPC
+  ├── Nano node custom JSON RPC over HTTP or IPC
   └── native Nano WebSocket subscriptions
                  │
           Nano or RsNano node
 ```
 
 The gateway is a plumbing boundary, not a Nano transaction interpreter. It
-repackages the native action RPC and WebSocket transports, hides active/passive
-upstream failover, and exposes only reviewed data-shape normalization. Native
-Nano RPC does not use the JSON-RPC 2.0 envelope, so the public contract is
-explicitly versioned rather than a compatibility alias surface.
+translates JSON-RPC 2.0 ledger calls to the Nano node's custom JSON RPC and
+consumes confirmations from the node's WebSocket interface. Nano node custom
+JSON RPC does not use the JSON-RPC 2.0 envelope, so the gateway and node expose
+separate protocols rather than compatibility aliases.
 
 ## 3. Guiding intent
 
@@ -100,7 +100,7 @@ remains unpleasant to integrate is also a failure.
 
 ## 4. Problem statement
 
-Nano exposes a mature action-based RPC interface and a separate WebSocket event
+Nano nodes expose a custom JSON RPC interface and a separate WebSocket event
 interface. These interfaces work, but they leave integrators to discover
 methods through documentation, interpret loosely structured errors, maintain
 transport-specific code, and reconstruct recovery behavior.
@@ -152,7 +152,7 @@ between transports.
 
 ### 6.2 Explicitly outside the first slice
 
-- Full coverage of every Nano RPC action.
+- Full coverage of every action in the Nano node custom JSON RPC interface.
 - Replacement or deprecation of node-native interfaces.
 - Changes to Nano or RsNano core repositories.
 - A public multi-tenant hosted gateway.
@@ -180,7 +180,7 @@ demonstration that cannot submit and observe a block does not prove enough.
 
 ## 7. Terminology
 
-### 7.1 Native Nano RPC
+### 7.1 Nano node custom JSON RPC
 
 The action-based request and response protocol exposed by Nano-compatible nodes.
 A representative request has this shape:
@@ -256,7 +256,7 @@ would not justify its maintenance cost.
 
 ## 9. Naming
 
-`Nano RPC Gateway` is the current working name.
+`Nano Gateway` is the current working name.
 
 The words `proxy` and `1:1 translator` remain useful informal descriptions, but
 they imply transparent equivalence. The implementation will normalize errors,
@@ -684,7 +684,7 @@ The gateway should support:
 - a separate container on a private network; and
 - development against remote or hosted endpoints where policy permits it.
 
-During phase-in, the gateway may run alongside the native node RPC and
+During phase-in, the gateway may run alongside the Nano node's custom JSON RPC
 WebSocket endpoints so existing clients remain unaffected. In a hardened
 deployment, an operator may keep those native ports private and expose only
 the gateway's selected public interfaces. This gateway does not change the
@@ -1056,7 +1056,7 @@ work. These references are context, not permanent authority.
 - Session: `01a03e05-31ef-78d1-a014-093f610617dc`
 - Workspace: `/Users/conny/Developer/nano/OpenRai`
 - Date: 2026-08-26
-- Topics: OpenRPC, JSON-RPC 2.0, native Nano RPC, `rpc.discover`, schema
+- Topics: OpenRPC, gateway JSON-RPC 2.0, Nano node custom JSON RPC, `rpc.discover`, schema
   authority, compatibility profiles, `work_generate`, and minimum deliverables.
 
 ### 28.2 ORIS transport and authentication layering
@@ -1064,7 +1064,7 @@ work. These references are context, not permanent authority.
 - Session: `01a00933-267d-7061-868f-ab4848f3bce0`
 - Workspace: `/Users/conny/Developer/nano/OpenRai/Standards`
 - Date: 2026-08-16
-- Topics: Nano RPC semantics versus JSON-RPC, HTTP, gRPC, and transport-specific
+- Topics: Nano node custom JSON RPC semantics versus JSON-RPC, HTTP, gRPC, and transport-specific
   authentication placement.
 
 ### 28.3 RsNano gRPC interoperability exploration
@@ -1154,7 +1154,7 @@ An agent working in this repository should apply these principles:
 1. Inspect actual node behavior before strengthening a contract claim.
 2. Separate observed facts, proposed policy, assumptions, and unresolved items.
 3. Keep the first implementation slice narrow and end-to-end useful.
-4. Do not silently convert native Nano RPC into JSON-RPC terminology.
+4. Do not describe Nano node custom JSON RPC actions as JSON-RPC methods.
 5. Preserve upstream errors and event-loss evidence before normalizing them.
 6. Keep public adapters thin and the internal operation/event model deep.
 7. Test through public interfaces and deterministic upstream adapters.

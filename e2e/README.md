@@ -1,4 +1,4 @@
-# Nano RPC Gateway E2E suite
+# Nano Gateway E2E suite
 
 This is an opt-in live suite for the gateway's current Clean V28.2 surface. It
 uses `uv` and `pytest`, and its JSON-RPC calls go through the Python client
@@ -64,8 +64,9 @@ retrying a failed mutation run.
 
 Useful overrides are `NANO_E2E_RPC_URL` (default
 `http://127.0.0.1:8090/rpc`), `NANO_E2E_EVENTS_URL` (default derived from the
-RPC URL), `NANO_E2E_WALLET_RPC_URL` (optional Nano node RPC URL passed to
-`xno-skills`), `NANO_E2E_TRANSFER_XNO` (default `0.000001`), and
+gateway JSON-RPC URL), `NANO_E2E_WALLET_RPC_URL` (optional Nano node custom
+JSON RPC URL passed to `xno-skills`), `NANO_E2E_TRANSFER_XNO` (default
+`0.000001`), and
 `NANO_E2E_BEARER_TOKEN` for a gateway that protects `process`.
 
 Tests skip with an explicit reason when live mode, mutation mode, wallets, or

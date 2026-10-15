@@ -1,0 +1,46 @@
+# Deployment configuration for the Nano Gateway container.
+#
+# The local development config binds 127.0.0.1, which is unreachable from anything other
+# than processes inside the same network namespace. A container has to bind 0.0.0.0 for
+# its peers on the compose network to reach it. This is the single most common reason a
+# gateway container starts cleanly and then refuses every connection.
+listen: "0.0.0.0:8090"
+
+# Public providers, reached over the container's normal egress. Failover is ordered.
+node_rpc_urls:
+  - "https://nanoslo.0x.no/proxy"
+  - "https://rainstorm.city/api"
+node_ws_urls:
+  - "wss://ws.nano.to"
+  - "wss://nanoslo.0x.no/websocket"
+
+profile: "nano-node/V28.2"
+
+# Authentication is off here to match the local preview instance and to exercise the
+# same code path the project uses while iterating. Turning it on is a deployment change,
+# not a build change: set require_common_auth to true and auth_public_key to the gateway's
+# Ed25519 public key, then issue a PASETO token per consumer from `cargo run -- issue`.
+# The browser token goes in NANOSWEEPER_WEB_RPC_GW_API_KEY, which reaches the browser
+# through the served runtime-config.js rather than through a rebuild.
+require_common_auth: false
+auth_public_key: null
+
+allow_work: false
+allow_control: false
+enable_discovery: true
+enable_browser_ui: true
+enable_inspector: false
+log_rpc: true
+
+# This is a browser-enforced policy, not access control: every endpoint here is already
+# reachable by any non-browser client. It stays permissive because the gateway models a
+# public RPC node, which is the whole point of exposing it on its own hostname.
+cors_origins:
+  - "*"
+
+# Advertised by /openrpc.json and /asyncapi.json. Without this the published contracts
+# advertise the container-internal bind address, which is not reachable by any caller.
+public_url: "https://dev-rpc.nanosweeper.lol/rpc"
+
+tls_cert: null
+tls_key: null

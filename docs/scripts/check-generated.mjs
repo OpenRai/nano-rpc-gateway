@@ -32,12 +32,26 @@ for (const required of [
   'Result shape',
   'It does not report votes or election progress.',
   'OpenRPC Playground',
+  'Gateway JSON-RPC 2.0 API and SSE',
+  '<title>Nano Gateway JSON-RPC 2.0 API Reference</title>',
+  '<h1>JSON-RPC 2.0 for Nano ledger queries</h1>',
+  'Gateway JSON-RPC 2.0 methods',
+  "Nano node's custom JSON RPC interface",
+  'JSON-RPC 2.0 requests to its API',
   'AsyncAPI Studio',
-  'schemaUrl=',
-  'studio.asyncapi.com/?url='
+  'href="/docs/openrpc/"',
+  'href="/docs/asyncapi/"',
+  'href="/openrpc.json"',
+  'href="/asyncapi.json"'
 ]) {
   if (!page.includes(required)) {
     console.error(`Generated documentation is missing required account-tracking guidance: ${required}`)
+    process.exit(1)
+  }
+}
+for (const stale of ['Nano RPC methods', 'Use Nano RPC', 'RPC tool']) {
+  if (page.includes(stale)) {
+    console.error(`Generated documentation uses ambiguous gateway terminology: ${stale}`)
     process.exit(1)
   }
 }

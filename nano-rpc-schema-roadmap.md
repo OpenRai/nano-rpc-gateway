@@ -1,8 +1,11 @@
-# A Machine-Readable Nano RPC Schema: Strategic Roadmap
+# A Machine-Readable Schema for Nano Node Custom JSON RPC: Strategic Roadmap
 
 **Status:** Draft for ORIS consideration
 **Scope:** nano-node (C++, canonical) and rsnano-node (Rust port)
 **Core thesis:** The primary value of this effort is not client/server code generation — with only two server implementations in existence, and possibly never more, that's a minor win. The primary value is **CI-enforced drift detection**: a mechanism that makes the build fail the instant the RPC surface changes in a way that isn't reflected in a versioned, machine-readable schema.
+
+In this roadmap, Nano RPC means the Nano node's custom JSON RPC action
+protocol. It is separate from the gateway's JSON-RPC 2.0 API.
 
 ---
 
@@ -36,7 +39,7 @@ There are exactly **16 distinct `_impl()` helper functions** in the file. Two do
 - A naive per-function scanner (looking only at each named handler's own body) would **miss parameters on well over half the API**, including bread-and-butter actions like `account_info`, `account_balance`, and most `wallet_*` calls.
 - But the helper surface is small and closed — 16 known functions, not arbitrary indirection. A one-time resolution of what each helper pulls from `request`, spliced into every caller, closes the gap without open-ended complexity.
 - Response shape sometimes branches on input at runtime (e.g. `account_info`'s `pending`/`receivable` vs. `confirmed_pending`/`confirmed_receivable` aliasing, gated on an `include_confirmed` flag). This needs a human judgment call per action to model as `oneOf`/conditional JSON Schema — not something a call-site scanner alone can infer.
-- Types are runtime-coerced (`request.get<bool>(...)`), not statically declared, and Nano's RPC is famous for accepting numbers-as-strings at the boundary — schema `type` fields need cross-checking against `nano-docs`' worked examples, not just the C++ template parameter.
+- Types are runtime-coerced (`request.get<bool>(...)`), not statically declared, and the Nano node's custom JSON RPC is known for accepting numbers as strings at the boundary — schema `type` fields need cross-checking against `nano-docs`' worked examples, not just the C++ template parameter.
 
 ### 1.3 Prior art: `mehlium/nano-rpc-api` → `nanobox-cc/openapi-nano-spec`
 
@@ -62,7 +65,7 @@ It ships a Redoc reference site, a Swagger UI, raw `openapi.json`/`openapi.yaml`
 
 ---
 
-## 2. The envelope question: Nano's RPC is not JSON-RPC of any vintage
+## 2. The envelope question: Nano node custom JSON RPC is not JSON-RPC 2.0
 
 ### 2.1 Origin: homegrown from day one, unrelated to any JSON-RPC lineage
 
@@ -170,7 +173,7 @@ This is the reframing this document exists to capture: **the dominant value of t
 
 ## References
 
-- Nano RPC documentation: [docs.nano.org/commands/rpc-protocol](https://docs.nano.org/commands/rpc-protocol/) · [nano-docs source](https://github.com/nanocurrency/nano-docs/blob/main/docs/commands/rpc-protocol.md) · [original nano-node wiki](https://github.com/nanocurrency/nano-node/wiki/RPC-protocol)
+- Nano node custom JSON RPC documentation: [docs.nano.org/commands/rpc-protocol](https://docs.nano.org/commands/rpc-protocol/) · [nano-docs source](https://github.com/nanocurrency/nano-docs/blob/main/docs/commands/rpc-protocol.md) · [original nano-node wiki](https://github.com/nanocurrency/nano-node/wiki/RPC-protocol)
 - `rsnano-node`: [repository](https://github.com/rsnano-node/rsnano-node) · [RsNano announcement](https://nano.org/en/news/rsnano-a-working-nano-node-written-in-100-rust--53016a8c) · [rsnano.com](https://rsnano.com/)
 - Prior art: [mehlium/nano-rpc-api](https://github.com/mehlium/nano-rpc-api) (archived) → [nanobox-cc/openapi-nano-spec](https://github.com/nanobox-cc/openapi-nano-spec)
 - OpenRPC: [spec.open-rpc.org](https://spec.open-rpc.org/) · [open-rpc.org](https://www.open-rpc.org/) · [generator-client (Rust client support)](https://www.npmjs.com/package/@open-rpc/generator-client)

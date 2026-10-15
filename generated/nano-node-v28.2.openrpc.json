@@ -828,8 +828,8 @@
     }
   },
   "info": {
-    "description": "JSON-RPC 2.0 adapter for a pinned Nano node profile.",
-    "title": "Nano Gateway",
+    "description": "This OpenRPC document describes the gateway's JSON-RPC 2.0 API. The gateway translates ledger methods into actions on the pinned Nano node profile's separate custom JSON RPC interface.",
+    "title": "Nano Gateway JSON-RPC 2.0 API",
     "version": "0.1.0"
   },
   "methods": [
@@ -1708,7 +1708,7 @@
       }
     }
   ],
-  "x-nano-artifact-sha256": "sha256:d443728b3819737e4e9ec2e7a5113a3bb27c5d65228fc11d93bb8ff9b7226b79",
+  "x-nano-artifact-sha256": "sha256:e971760623b7babad97f553c5368efce90d874aa6033cadd1b83c6abe134f57e",
   "x-nano-common-authentication": {
     "required": true
   },

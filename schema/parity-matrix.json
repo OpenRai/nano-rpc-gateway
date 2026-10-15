@@ -419,7 +419,7 @@
       "status": "translation-layer",
       "item": 5,
       "anchor": "openrpc-spec#rpc.discover",
-      "note": "Standard OpenRPC discovery. It is not a Nano node action, so it has no upstream counterpart in the RPC protocol page."
+      "note": "Standard OpenRPC discovery for the gateway JSON-RPC API. It is not an action in the Nano node custom JSON RPC interface, so it has no upstream counterpart in the node protocol reference."
     }
   },
   "stream_events": {

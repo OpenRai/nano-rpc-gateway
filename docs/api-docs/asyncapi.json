@@ -191,8 +191,8 @@
   },
   "defaultContentType": "application/json",
   "info": {
-    "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state.",
-    "title": "Nano Gateway Events",
+    "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if confirmation is not observed. Notifications identify account activity; call accounts_balances on the Nano node's custom JSON RPC interface for an event-triggered batch snapshot of balance and receivable state.",
+    "title": "Nano Gateway SSE Confirmation Events",
     "version": "0.1.0"
   },
   "operations": {

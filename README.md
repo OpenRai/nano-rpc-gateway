@@ -1,21 +1,24 @@
-# Nano RPC Gateway
+# Nano Gateway
 
-Nano RPC Gateway is an exploratory sidecar that aims to present a modern,
-discoverable integration surface in front of an unmodified Nano or RsNano
-node.
+This sidecar gives clients a discoverable API in front of an unmodified Nano
+or RsNano node. Clients call the gateway with JSON-RPC 2.0. For ledger methods,
+the gateway translates those calls into the Nano node's custom JSON RPC
+actions. The gateway reads confirmation events from the node's WebSocket
+interface and publishes them through SSE.
 
-The proposed external surface combines:
+The gateway exposes a JSON-RPC 2.0 API, an OpenRPC schema for that API, and an SSE event stream:
 
 - JSON-RPC 2.0 for commands and queries;
 - OpenRPC discovery for tools and generated clients; and
 - Server-Sent Events (SSE) for filtered node event streams.
 
-The gateway translates these interfaces to the node's native action-based RPC
-and WebSocket interfaces. The v0.1 implementation accepts JSON-RPC 2.0 at
-`POST /rpc`, serves callable-method discovery at `/openrpc.json`, serves the
-receive-only SSE contract at `/asyncapi.json`, and emits confirmations at
-`/events/confirmations`. Every SSE `data:` value is a JSON-RPC 2.0 notification;
-its `method` matches the SSE `event:` name and it has no `id` member.
+The gateway accepts JSON-RPC 2.0 requests at `POST /rpc`. `/openrpc.json`
+describes that API. Nano nodes use a separate custom JSON RPC interface
+upstream; the gateway translates ledger methods between the two protocols.
+The gateway publishes node confirmations through SSE at
+`/events/confirmations`; `/asyncapi.json` describes that event stream. Every SSE
+`data:` value is a JSON-RPC 2.0 notification. Its `method` matches the SSE
+`event:` name, and it has no `id` member.
 
 The Clean V28.2 profile is authority-reviewed in
 [SCHEMA_POLICY.md](SCHEMA_POLICY.md), exposes a stable artifact digest, and
@@ -23,8 +26,9 @@ ships generated TypeScript bindings in [generated/](generated/). They are
 regenerated offline from the reviewed OpenRPC document with `make client`
 (after `make docs-install`); `make docs-check` fails when they drift.
 
-The committed reference in [docs/api-docs/](docs/api-docs/) combines RPC and Events
-tabs, global search, deep links, and raw OpenRPC/AsyncAPI downloads. Run
+The committed reference in [docs/api-docs/](docs/api-docs/) combines gateway
+JSON-RPC 2.0 and SSE tabs, global search, deep links, and raw OpenRPC/AsyncAPI
+downloads. Run
 `make docs-install`, then `make docs-generate`, `make docs-validate`, or
 `make docs-preview`. `make docs-model-smoke` proves the AsyncAPI contract can
 produce typed event models without shipping a subscriber library from this
@@ -32,9 +36,16 @@ gateway. The reference links to the hosted OpenRPC Playground and AsyncAPI
 Studio; those tools load the published JSON contracts and handle live
 exploration separately from this site.
 
+Browser pages are disabled by default. Set `enable_browser_ui: true` to serve
+the landing page at `/api-landing-page`, the reference at `/docs/`, and
+redirect `/` to the landing page for requests that accept HTML. The hosted
+viewers fetch schemas and make JSON-RPC 2.0 requests directly to the gateway,
+so deployments with restricted `cors_origins` must allow
+`https://playground.open-rpc.org` and `https://studio.asyncapi.com`.
+
 Run `cargo run -- serve`; a missing `gateway.yaml` is created with safe
-defaults (`127.0.0.1:8090` for the gateway, leaving Nano's conventional native
-RPC port `7076` available). Base reads are unauthenticated, while work
+defaults (`127.0.0.1:8090` for the gateway, leaving Nano node's custom JSON RPC
+port `7076` available). Base reads are unauthenticated, while work
 generation is disabled until a PASETO public key and explicit work policy are
 configured. Common methods, including `process`, require PASETO by default;
 set `require_common_auth: false` for an intentionally public Common profile.
@@ -63,10 +74,10 @@ lifecycle diagnostics remain opt-in: set `log_rpc: true` in the config or run
 upstream status/duration, and subscription filter counts, but never request
 parameters, account/hash values, tokens, or provider credentials.
 
-For live RPC testing, open the OpenRPC Playground link in the generated
-reference and configure its endpoint from the published schema. For event
-contract inspection, open the AsyncAPI Studio link. The gateway ships schemas
-and event streams, not a bespoke inspector UI.
+For live JSON-RPC testing, open the OpenRPC Playground link in the generated
+reference. It loads the gateway's OpenRPC schema and sends JSON-RPC 2.0
+requests to the gateway. Open the AsyncAPI Studio link to inspect the
+confirmation-event contract. The gateway serves both schemas and event streams.
 
 Operational deployment and isolation guidance is in [OPERATIONS.md](OPERATIONS.md);
 the reproducible request harness is [scripts/benchmark.sh](scripts/benchmark.sh),

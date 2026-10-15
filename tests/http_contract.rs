@@ -147,6 +147,7 @@ fn test_config(node_rpc_url: String) -> Config {
         allow_control: false,
         auth_public_key: None,
         enable_discovery: true,
+        enable_browser_ui: false,
         log_rpc: false,
         cors_origins: vec![
             "http://127.0.0.1:8080".into(),
@@ -863,6 +864,149 @@ async fn openrpc_advertises_configured_public_url() {
 }
 
 #[tokio::test]
+async fn browser_ui_is_opt_in_and_negotiates_html_at_root() {
+    let mut disabled = test_config(start_native_stub().await);
+    let disabled_state = AppState::new(disabled.clone()).expect("state");
+    for uri in [
+        "/",
+        "/api-landing-page",
+        "/docs/",
+        "/docs/openrpc/",
+        "/docs/asyncapi/",
+    ] {
+        let request = axum::http::Request::builder()
+            .uri(uri)
+            .header("accept", "text/html")
+            .body(axum::body::Body::empty())
+            .expect("request");
+        let response = app(disabled_state.clone())
+            .oneshot(request)
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+    }
+
+    disabled.enable_browser_ui = true;
+    let enabled_state = AppState::new(disabled).expect("state");
+    for accept in [
+        None,
+        Some("application/json"),
+        Some("*/*"),
+        Some("text/html;q=0"),
+    ] {
+        let mut builder = axum::http::Request::builder().uri("/");
+        if let Some(accept) = accept {
+            builder = builder.header("accept", accept);
+        }
+        let response = app(enabled_state.clone())
+            .oneshot(builder.body(axum::body::Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers()[header::VARY], "Accept");
+    }
+    let request = axum::http::Request::builder()
+        .uri("/")
+        .header("accept", "application/json, text/html;q=0.8")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(enabled_state.clone())
+        .oneshot(request)
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(response.headers()[header::LOCATION], "/api-landing-page");
+    assert_eq!(response.headers()[header::VARY], "Accept");
+
+    for (uri, expected) in [
+        ("/api-landing-page", "Nano Gateway API"),
+        ("/docs/", "Nano Gateway Reference"),
+    ] {
+        let response = app(enabled_state.clone())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .body(axum::body::Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        assert!(String::from_utf8_lossy(&body).contains(expected));
+    }
+    let response = app(enabled_state)
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/docs/assets/reference.css")
+                .body(axum::body::Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/css; charset=utf-8"
+    );
+}
+
+#[tokio::test]
+async fn hosted_viewers_use_configured_schema_urls_and_ignore_host_header() {
+    let mut config = test_config(start_native_stub().await);
+    config.enable_browser_ui = true;
+    config.public_url = Some("https://gw.example.test/rpc".into());
+    let state = AppState::new(config).expect("state");
+    for (uri, expected) in [
+        (
+            "/docs/openrpc/",
+            "https%3A%2F%2Fgw.example.test%2Fopenrpc.json",
+        ),
+        (
+            "/docs/asyncapi/",
+            "https%3A%2F%2Fgw.example.test%2Fasyncapi.json",
+        ),
+    ] {
+        let request = axum::http::Request::builder()
+            .uri(uri)
+            .header("host", "attacker.invalid")
+            .body(axum::body::Body::empty())
+            .expect("request");
+        let response = app(state.clone()).oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        let location = response.headers()[header::LOCATION]
+            .to_str()
+            .expect("location");
+        assert!(location.contains(expected), "{location}");
+        assert!(!location.contains("attacker.invalid"));
+    }
+}
+
+#[tokio::test]
+async fn hosted_viewer_uses_configured_listener_when_public_url_is_absent() {
+    let mut config = test_config("http://127.0.0.1:1".into());
+    config.listen = "127.0.0.1:8090".into();
+    config.enable_browser_ui = true;
+    let state = AppState::new(config).expect("state");
+    let request = axum::http::Request::builder()
+        .uri("/docs/openrpc/")
+        .header("host", "untrusted.example")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    let response = app(state).oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        response.headers()[header::LOCATION],
+        "https://playground.open-rpc.org/?schemaUrl=http%3A%2F%2F127.0.0.1%3A8090%2Fopenrpc.json"
+    );
+}
+
+#[tokio::test]
 async fn openrpc_advertises_listen_when_public_url_is_absent() {
     let config = test_config(start_native_stub().await);
     let listen = config.listen.clone();
@@ -956,6 +1100,7 @@ fn public_url_defaults_to_absent_so_listen_is_advertised() {
     )
     .expect("config parses");
     assert!(config.public_url.is_none());
+    assert!(!config.enable_browser_ui);
     assert!(config.validate().is_ok());
 }
 
@@ -1397,6 +1542,7 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
                 .encode(signing_key.verifying_key().to_bytes()),
         ),
         enable_discovery: true,
+        enable_browser_ui: false,
         log_rpc: false,
         cors_origins: vec![
             "http://127.0.0.1:8080".into(),

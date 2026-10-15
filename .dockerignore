@@ -1,0 +1,32 @@
+# Without this, the build context carries target/ (a full debug tree), .git, .beads
+# (a Dolt database), and local credentials in .env. The daemon has to hash every one of
+# them on each build, and anything not excluded here is reachable from a RUN step.
+
+target/
+**/target/
+
+.git
+.gitignore
+.beads
+.github
+.kilo
+.claude
+.codex
+.agents
+
+.env
+.env.*
+!.env.example
+
+# Rust build output and local caches.
+**/*.rs.bk
+*.pdb
+
+# Devnet node data and test fixtures are not needed to build the binary.
+devnet/
+fixtures/
+benchmarks/
+e2e/
+compatibility/
+profiles/
+tests/

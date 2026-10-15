@@ -10,7 +10,7 @@ fi
 
 if tmux has-session -t "$session" 2>/dev/null; then
   tmux kill-session -t "$session"
-  echo "Stopped Nano RPC Gateway tmux session '$session'."
+  echo "Stopped Nano Gateway tmux session '$session'."
 else
-  echo "No Nano RPC Gateway tmux session '$session' is running."
+  echo "No Nano Gateway tmux session '$session' is running."
 fi

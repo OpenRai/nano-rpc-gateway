@@ -26,7 +26,7 @@ bd dolt push          # Push beads data to remote
 ## Upstream Conformance (non-negotiable)
 
 Every JSON-RPC method this Gateway exposes must be **1:1 equivalent to the
-upstream Nano RPC method** documented at
+upstream Nano node custom JSON RPC action** documented at
 <https://docs.nano.org/commands/rpc-protocol>. That means the same method name,
 the same parameters, and the same response fields as the node action it fronts.
 

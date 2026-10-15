@@ -1,4 +1,4 @@
-//! Nano RPC Gateway: a deliberately small, typed boundary around native Nano RPC.
+//! Nano Gateway: a typed boundary that exposes JSON-RPC 2.0 and translates ledger calls to Nano node custom JSON RPC.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -64,6 +64,7 @@ allow_work: false
 allow_control: false
 auth_public_key: null
 enable_discovery: true
+enable_browser_ui: false
 log_rpc: false
 cors_origins:
   - "*"
@@ -111,6 +112,9 @@ pub struct Config {
     pub auth_public_key: Option<String>,
     #[serde(default = "default_discovery")]
     pub enable_discovery: bool,
+    /// Serve the opt-in browser landing page and API reference.
+    #[serde(default)]
+    pub enable_browser_ui: bool,
     /// Emit safe JSON-RPC and SSE lifecycle diagnostics.
     #[serde(default)]
     pub log_rpc: bool,
@@ -706,9 +710,9 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
     json!({
         "asyncapi": "3.1.0",
         "info": {
-            "title": "Nano Gateway Events",
+            "title": "Nano Gateway SSE Confirmation Events",
             "version": "0.1.0",
-            "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if confirmation is not observed. Notifications identify account activity; use the native accounts_balances RPC for an event-triggered batch snapshot of balance and receivable state."
+            "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if confirmation is not observed. Notifications identify account activity; call accounts_balances on the Nano node's custom JSON RPC interface for an event-triggered batch snapshot of balance and receivable state."
         },
         "defaultContentType": "application/json",
         "servers": {"gateway": {"host": host, "protocol": protocol, "pathname": "/events/confirmations"}},
@@ -1190,7 +1194,7 @@ fn build_openrpc_document(
         }),
     );
     json!({
-        "openrpc": "1.3.2", "info": {"title":"Nano Gateway", "version":"0.1.0", "description":"JSON-RPC 2.0 adapter for a pinned Nano node profile."},
+        "openrpc": "1.3.2", "info": {"title":"Nano Gateway JSON-RPC 2.0 API", "version":"0.1.0", "description":"This OpenRPC document describes the gateway's JSON-RPC 2.0 API. The gateway translates ledger methods into actions on the pinned Nano node profile's separate custom JSON RPC interface."},
         "servers": [{"name":"gateway", "url":gateway_url, "variables":{"gatewayUrl":{"default":gateway_url}}}],
         "methods": methods,
         "components": Value::Object(components), "x-nano-profile": profile
@@ -1350,7 +1354,7 @@ impl NativeClient {
                 upstream_url = %redacted_endpoint,
                 status = status.as_u16(),
                 duration_ms = started.elapsed().as_millis() as u64,
-                "Nano RPC response >>>"
+                "Nano node custom JSON RPC response >>>"
             );
         }
         if !status.is_success() {
@@ -2143,6 +2147,13 @@ impl AppState {
         };
         format!("{scheme}://{}/rpc", self.config.listen)
     }
+    fn schema_url(&self, path: &str) -> String {
+        let mut url = Url::parse(&self.gateway_url()).expect("validated gateway URL");
+        url.set_path(path);
+        url.set_query(None);
+        url.set_fragment(None);
+        url.to_string()
+    }
 }
 
 fn validate_params(method: &str, params: &Value) -> Result<(), String> {
@@ -2422,7 +2433,8 @@ pub fn app(state: AppState) -> Router {
         .allow_origin(allow_origin)
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
-    Router::new()
+    let mut router = Router::new()
+        .route("/", get(browser_root))
         .route("/rpc", post(rpc_handler))
         .route("/openrpc.json", get(openrpc_handler))
         .route("/asyncapi.json", get(asyncapi_handler))
@@ -2435,8 +2447,119 @@ pub fn app(state: AppState) -> Router {
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .layer(ConcurrencyLimitLayer::new(128))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
+        .layer(TraceLayer::new_for_http());
+    if state.config.enable_browser_ui {
+        router = router
+            .route("/api-landing-page", get(landing_page))
+            .route("/docs/", get(reference_page))
+            .route("/docs", get(reference_redirect))
+            .route("/docs/assets/:asset", get(reference_asset))
+            .route("/docs/assets/fonts/:asset", get(reference_font))
+            .route("/docs/openrpc/", get(openrpc_viewer_redirect))
+            .route("/docs/asyncapi/", get(asyncapi_viewer_redirect));
+    }
+    router.with_state(state)
+}
+
+async fn browser_root(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let mut response =
+        if state.config.enable_browser_ui && accepts_html(headers.get(header::ACCEPT)) {
+            axum::response::Redirect::temporary("/api-landing-page").into_response()
+        } else {
+            StatusCode::NOT_FOUND.into_response()
+        };
+    response
+        .headers_mut()
+        .insert(header::VARY, HeaderValue::from_static("Accept"));
+    response
+}
+
+fn accepts_html(accept: Option<&axum::http::HeaderValue>) -> bool {
+    let Some(accept) = accept.and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+    accept.split(',').any(|item| {
+        let mut parts = item.trim().split(';');
+        if !parts
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .eq_ignore_ascii_case("text/html")
+        {
+            return false;
+        }
+        let Some(quality) = parts.find_map(|parameter| {
+            let (name, value) = parameter.trim().split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case("q")
+                .then_some(value.trim())
+        }) else {
+            return true;
+        };
+        quality
+            .parse::<f32>()
+            .is_ok_and(|q| q.is_finite() && q > 0.0 && q <= 1.0)
+    })
+}
+
+async fn landing_page() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("../docs/browser-landing.html"))
+}
+async fn reference_page() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("../docs/api-docs/index.html"))
+}
+async fn reference_redirect() -> axum::response::Redirect {
+    axum::response::Redirect::permanent("/docs/")
+}
+
+async fn reference_asset(axum::extract::Path(asset): axum::extract::Path<String>) -> Response {
+    match asset.as_str() {
+        "reference.css" => (
+            [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+            include_bytes!("../docs/api-docs/assets/reference.css").as_slice(),
+        )
+            .into_response(),
+        "reference.js" => (
+            [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+            include_bytes!("../docs/api-docs/assets/reference.js").as_slice(),
+        )
+            .into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+async fn reference_font(axum::extract::Path(asset): axum::extract::Path<String>) -> Response {
+    match asset.as_str() {
+        "montserrat-latin-wght-normal.woff2" => (
+            [(header::CONTENT_TYPE, "font/woff2")],
+            include_bytes!("../docs/api-docs/assets/fonts/montserrat-latin-wght-normal.woff2")
+                .as_slice(),
+        )
+            .into_response(),
+        "open-sans-latin-wght-normal.woff2" => (
+            [(header::CONTENT_TYPE, "font/woff2")],
+            include_bytes!("../docs/api-docs/assets/fonts/open-sans-latin-wght-normal.woff2")
+                .as_slice(),
+        )
+            .into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn openrpc_viewer_redirect(State(state): State<AppState>) -> Response {
+    viewer_redirect(
+        "https://playground.open-rpc.org/?schemaUrl=",
+        &state.schema_url("/openrpc.json"),
+    )
+}
+async fn asyncapi_viewer_redirect(State(state): State<AppState>) -> Response {
+    viewer_redirect(
+        "https://studio.asyncapi.com/?url=",
+        &state.schema_url("/asyncapi.json"),
+    )
+}
+fn viewer_redirect(prefix: &str, schema_url: &str) -> Response {
+    let target = format!("{prefix}{}", urlencoding::encode(schema_url));
+    axum::response::Redirect::temporary(&target).into_response()
 }
 
 async fn ready_handler(State(state): State<AppState>) -> (StatusCode, Json<Value>) {

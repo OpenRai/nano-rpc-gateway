@@ -1,8 +1,8 @@
 # Operating the v0.1 gateway
 
-The gateway is a sidecar. Keep the Nano node's native HTTP RPC and WebSocket
-listeners on loopback or an isolated network, and expose only the gateway
-listener to integrators.
+The gateway is a sidecar. Keep the Nano node's custom JSON RPC HTTP interface
+and WebSocket listeners on loopback or an isolated network. Expose only the
+gateway listener to integrators. Integrators call the gateway with JSON-RPC 2.0.
 
 The `/metrics` endpoint is deliberately small and credential-free. It exposes
 `nano_gateway_up`, `nano_gateway_upstream_ready`, request/error totals,
@@ -75,9 +75,9 @@ reconcile state with JSON-RPC before applying new events. Rotate PASETO signing
 keys by replacing the configured verification key and issuing short-lived
 tokens; the gateway stores no token revocation DB.
 
-For live RPC testing, use the OpenRPC Playground link in the generated
-reference and configure its endpoint from the published schema. Use AsyncAPI
-Studio to inspect the receive-only event contract. The gateway exposes the
+For live JSON-RPC testing, use the OpenRPC Playground link in the generated
+reference. It loads the gateway's OpenRPC schema and sends JSON-RPC 2.0 requests.
+Use AsyncAPI Studio to inspect the receive-only event contract. The gateway exposes the
 machine-readable contracts and runtime endpoints; it does not embed a custom
 inspector UI.
 
