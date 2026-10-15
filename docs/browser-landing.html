@@ -1,6 +1,175 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nano Gateway</title>
-<style>body{max-width:760px;margin:12vh auto;padding:24px;background:#08121c;color:#eaf4ff;font:17px/1.6 system-ui,sans-serif}h1{font-size:2.8rem}a{color:#74c0fc}li{margin:14px 0}</style></head>
-<body><h1>Nano Gateway</h1><p>This gateway exposes methods equivalent to <a href="https://github.com/nanocurrency/nano-node" target="_blank" rel="noreferrer">Nano node's</a> actions through a <a href="https://www.jsonrpc.org/specification" target="_blank" rel="noreferrer">JSON-RPC 2.0</a> API formally described by <a href="https://spec.open-rpc.org/" target="_blank" rel="noreferrer">OpenRPC</a>. It translates ledger calls to that custom <a href="https://docs.nano.org/commands/rpc-protocol/" target="_blank" rel="noreferrer">JSON RPC</a> interface. Optional confirmation events stream over SSE and are described by <a href="https://www.asyncapi.com/docs/reference/specification/v3.0.0" target="_blank" rel="noreferrer">AsyncAPI</a>.</p>
-<ul><li><a href="/docs/">Gateway JSON-RPC and SSE reference</a></li><li><a href="/docs/openrpc/">OpenRPC Playground (JSON-RPC 2.0)</a></li><li><a href="/docs/asyncapi/">AsyncAPI Studio (SSE events)</a></li><li><a href="/openrpc.json">OpenRPC schema (JSON)</a></li><li><a href="/asyncapi.json">AsyncAPI schema (JSON)</a></li></ul></body></html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nano Gateway API</title>
+<style>
+:root {
+  --bg: #0b0f19;
+  --fg: #e2e8f0;
+  --accent: #209ce9;
+  --muted: #94a3b8;
+  --line: rgba(148, 163, 184, 0.2);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: var(--bg);
+  background-image: linear-gradient(to left top, #209ce9, #2e82cb, #3269ad, #31518e, #2c3b71, #28305e, #22254c, #1c1b3b, #19172f, #151323, #100e17, #070707);
+  background-attachment: fixed;
+  color: var(--fg);
+  margin: 0;
+  padding: 2rem 1rem;
+  line-height: 1.6;
+}
+
+main {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: clamp(2rem, 6vh, 3.5rem) clamp(1rem, 5vw, 2.5rem);
+  background: rgba(11, 15, 25, 0.28);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 1rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.hero {
+  margin: 0 auto 2.25rem;
+  text-align: center;
+}
+
+.hero h1 {
+  position: relative;
+  margin: 0;
+  font-size: 0;
+  font-weight: 600;
+}
+
+.glare-row {
+  position: relative;
+  display: inline-block;
+  background-image: linear-gradient(to bottom, #e2e8f0 0%, #83d4ff 34%, #209ce9 66%, #9c8de0 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.glare-row::after {
+  position: absolute;
+  inset: 0;
+  content: "Nano protocol gateway";
+  pointer-events: none;
+  color: transparent;
+  background-image: linear-gradient(90deg, transparent 38%, rgba(255, 255, 255, 0.18) 44%, #fff 50%, rgba(196, 238, 255, 0.9) 55%, transparent 62%);
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  white-space: pre;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.8)) drop-shadow(0 0 8px rgba(131, 212, 255, 0.75));
+  animation: title-glare 6s ease-in-out infinite;
+}
+
+@keyframes title-glare {
+  0%, 82% { background-position: 100% 0; }
+  91%, 100% { background-position: 0 0; }
+}
+
+.hero pre {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  background-image: linear-gradient(to bottom, #e2e8f0 0%, #83d4ff 34%, #209ce9 66%, #9c8de0 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 9px rgba(32, 156, 233, 0.32));
+  font: 600 clamp(10px, 2.15vw, 17.5px)/1.22 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: -0.045em;
+  text-align: left;
+  white-space: pre;
+}
+
+.intro {
+  color: var(--fg);
+  font-size: 1.0625rem;
+  margin: 0 0 1.75rem;
+}
+
+a { color: var(--accent); }
+ul {
+  list-style: none;
+  margin-left: 0;
+  padding-left: 0.25rem;
+}
+
+li {
+  position: relative;
+  margin: 4px 0;
+  padding-left: 1.15rem;
+}
+
+li::before {
+  position: absolute;
+  top: 0.12em;
+  left: 0;
+  transform: translateY(2px);
+  content: "✧";
+  color: #83d4ff;
+  font-size: 1rem;
+  line-height: 1;
+  text-shadow: 0 0 8px rgba(131, 212, 255, 0.8);
+}
+
+@media (max-width: 520px) {
+  main { padding-top: 2rem; padding-bottom: 2rem; }
+  .hero pre { font-size: clamp(8.75px, 2.56vw, 12.5px); }
+  .intro { font-size: 1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glare-row::after { animation: none; }
+}
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <h1 aria-label="Nano Gateway"><pre aria-hidden="true"><span class="glare-row">Nano protocol gateway</span>
+     __________  _  __    ___  ___  _____
+ __ / / __/ __ \/ |/ /___/ _ \/ _ \/ ___/
+/ // /\ \/ /_/ /    /___/ , _/ ___/ /__
+\___/___/\____/_/|_/   /_/|_/_/   \___/
+  / __/ __/ __/  
+ _\ \_\ \/ _/  
+/___/___/___/    profile:   {{profile}}</pre></h1>
+  </section>
+
+  <p class="intro">This gateway exposes methods equivalent to <a href="https://github.com/nanocurrency/nano-node" target="_blank" rel="noreferrer">Nano node's</a> actions through a <a href="https://www.jsonrpc.org/specification" target="_blank" rel="noreferrer">JSON-RPC 2.0</a> API formally described by <a href="https://spec.open-rpc.org/" target="_blank" rel="noreferrer">OpenRPC</a>. It translates ledger calls to that custom <a href="https://docs.nano.org/commands/rpc-protocol/" target="_blank" rel="noreferrer">JSON RPC</a> interface. Optional confirmation events stream over SSE and are described by <a href="https://www.asyncapi.com/docs/reference/specification/v3.0.0" target="_blank" rel="noreferrer">AsyncAPI</a>.</p>
+
+  <nav aria-label="API resources">
+    <ul>
+      <li><a href="/docs/">Gateway JSON-RPC and SSE reference</a></li>
+      <li><a href="/docs/openrpc/">OpenRPC Playground (JSON-RPC 2.0)</a></li>
+      <li><a href="/docs/asyncapi/">AsyncAPI Studio (SSE events)</a></li>
+      <li><a href="/openrpc.json">OpenRPC schema (JSON)</a></li>
+      <li><a href="/asyncapi.json">AsyncAPI schema (JSON)</a></li>
+    </ul>
+  </nav>
+</main>
+</body>
+</html>

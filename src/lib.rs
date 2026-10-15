@@ -2502,8 +2502,20 @@ fn accepts_html(accept: Option<&axum::http::HeaderValue>) -> bool {
     })
 }
 
-async fn landing_page() -> axum::response::Html<&'static str> {
-    axum::response::Html(include_str!("../docs/browser-landing.html"))
+async fn landing_page(State(state): State<AppState>) -> axum::response::Html<String> {
+    let profile = escape_html_text(&state.config.profile);
+    axum::response::Html(
+        include_str!("../docs/browser-landing.html").replace("{{profile}}", &profile),
+    )
+}
+
+fn escape_html_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 async fn reference_page() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("../docs/api-docs/index.html"))
