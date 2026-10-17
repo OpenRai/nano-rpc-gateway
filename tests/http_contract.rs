@@ -920,7 +920,7 @@ async fn browser_ui_is_opt_in_and_negotiates_html_at_root() {
 
     for (uri, expected) in [
         ("/api-landing-page", "Nano Gateway API"),
-        ("/docs/", "Nano Gateway Reference"),
+        ("/docs/", "Nano Gateway JSON-RPC 2.0 API Reference"),
     ] {
         let response = app(enabled_state.clone())
             .oneshot(
