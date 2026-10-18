@@ -16,18 +16,27 @@ hash, request ID, token, or raw error text is used as a metric label.
    Public providers can be used when their terms and rate limits are suitable:
    Nanswap accepts `https://nodes.nanswap.com/XNO?api_key=${NANSWAP_COM_API_KEY}` and
    `wss://nodes.nanswap.com/ws/?ticker=XNO&api_key=${NANSWAP_COM_API_KEY}`;
-   Nano.to accepts `https://${NANO_TO_API_KEY}:@rpc.nano.to/` for HTTP and
-   `wss://ws.nano.to` for WebSocket.    The gateway loads an optional `.env` beside
+   Nano.to accepts `https://${GATEWAY_RPC_UPSTREAM_API_KEY}:@rpc.nano.to/` for HTTP and
+   `wss://ws.nano.to` for WebSocket. The API key is supplied through generic
+   configuration interpolation in the URL; there is no provider-specific gateway
+   setting. The gateway loads an optional `.env` beside
    the chosen configuration file, expands `${NAME}` values before parsing YAML,
    and lets explicitly exported environment variables take precedence.
    Expansion is textual over the whole file, so a `${NAME}` inside a comment is
    expanded too, and an unset variable is a hard startup error rather than an
    empty string. Comment out a placeholder instead of naming an undefined one.
-   The gateway strips Nano.to URL userinfo before issuing the request and sends
-   it as empty-password Basic authentication. Keep these key-bearing values in
+   The gateway strips URL userinfo before issuing the request and sends the
+   username as Basic authentication with an empty password. Keep key-bearing values in
    a deployment secret or untracked local config, never in a committed example.
+   Nano.to's documented `work_generate` response uses `frontier` and adds service
+   metadata, while the Nano node V28 response uses `hash`. The gateway validates the
+   pinned Nano profile and therefore rejects that response instead of forwarding
+   incompatible data. Use a work upstream that returns the documented node shape, or
+   resolve the discrepancy with the provider before routing work through this gateway.
 3. Leave `allow_work` and `allow_control` disabled unless the corresponding
-   policy and PASETO verification key have been reviewed. Set
+   policy and PASETO verification key have been reviewed. These flags enable
+   Work-scope `work_generate` and Control-scope `work_cancel`; `work_validate`
+   follows the Common-method authentication policy. Set
    `require_common_auth: false` only when the public Common profile is
    intentional; this makes `process` callable without a token.
    Upstream selection and failure events are always emitted for RPC and

@@ -606,8 +606,24 @@ pub fn registry() -> Vec<MethodSpec> {
             scope: Scope::Work,
             params: "WorkGenerateParams",
             result: "WorkGenerateResult",
-            description: "Delegate proof-of-work generation to the node.",
-            schema_provenance: "profiles/nano-node-v28.2.yaml",
+            description: "Generate proof of work for a block. Requires a Work-scope bearer token and allow_work.",
+            schema_provenance: "https://docs.nano.org/commands/rpc-protocol/#work_generate",
+        },
+        MethodSpec {
+            name: "work_cancel",
+            scope: Scope::Control,
+            params: "WorkCancelParams",
+            result: "WorkCancelResult",
+            description: "Stop generating work for a block. Requires a Control-scope bearer token and allow_control.",
+            schema_provenance: "https://docs.nano.org/commands/rpc-protocol/#work_cancel",
+        },
+        MethodSpec {
+            name: "work_validate",
+            scope: Scope::Common,
+            params: "WorkValidateParams",
+            result: "WorkValidateResult",
+            description: "Check whether work is valid for a block. Authentication follows the Common-method policy.",
+            schema_provenance: "https://docs.nano.org/commands/rpc-protocol/#work_validate",
         },
     ]
 }
@@ -618,30 +634,44 @@ pub fn openrpc_document(
     include_discovery: bool,
     gateway_url: &str,
 ) -> Value {
-    openrpc_document_with_auth(profile, include_work, include_discovery, gateway_url, true)
+    openrpc_document_with_auth(
+        profile,
+        include_work,
+        false,
+        include_discovery,
+        gateway_url,
+        true,
+    )
 }
 
 /// Build the runtime discovery document, including whether Common methods are public.
 pub fn openrpc_document_with_auth(
     profile: &str,
     include_work: bool,
+    include_control: bool,
     include_discovery: bool,
     gateway_url: &str,
     require_common_auth: bool,
 ) -> Value {
-    let mut document =
-        build_openrpc_document(profile, include_work, include_discovery, gateway_url);
+    let mut document = build_openrpc_document(
+        profile,
+        include_work,
+        include_control,
+        include_discovery,
+        gateway_url,
+    );
     document["x-nano-common-authentication"] = json!({"required": require_common_auth});
     if !require_common_auth {
-        if let Some(method) = document["methods"].as_array_mut().and_then(|methods| {
-            methods
+        if let Some(methods) = document["methods"].as_array_mut() {
+            for method in methods
                 .iter_mut()
-                .find(|method| method["name"] == "process")
-        }) {
-            method["x-nano-capability"]["requires"] = json!([]);
+                .filter(|method| method["name"] == "process" || method["name"] == "work_validate")
+            {
+                method["x-nano-capability"]["requires"] = json!([]);
+            }
         }
     }
-    let digest = openrpc_artifact_digest(profile, include_work, include_discovery);
+    let digest = openrpc_artifact_digest(profile, include_work, include_control, include_discovery);
     if let Some(object) = document.as_object_mut() {
         object.insert("x-nano-artifact-sha256".into(), Value::String(digest));
     }
@@ -651,11 +681,13 @@ pub fn openrpc_document_with_auth(
 pub fn openrpc_artifact_digest(
     profile: &str,
     include_work: bool,
+    include_control: bool,
     include_discovery: bool,
 ) -> String {
     let document = build_openrpc_document(
         profile,
         include_work,
+        include_control,
         include_discovery,
         "https://gateway.invalid/rpc",
     );
@@ -1015,6 +1047,32 @@ fn component_schemas() -> serde_json::Map<String, Value> {
             "json_block":{"type":"boolean","default":false,"description":"Send `block` as a JSON subtree instead of a JSON string."}}}),
     );
     add(
+        "WorkGenerateParams",
+        json!({"type":"object","required":["hash"],"properties":{
+            "hash":{"type":"string","minLength":1},
+            "use_peers":{"type":"boolean","default":false,"description":"Query configured work peers when generating work."},
+            "difficulty":{"type":"string","description":"Optional 16-digit hexadecimal work difficulty."},
+            "multiplier":{"type":"number","exclusiveMinimum":0,"description":"Optional positive multiplier; overrides difficulty."},
+            "account":{"type":"string","description":"Nano account forwarded to work peers when use_peers is true."},
+            "version":{"type":"string","enum":["work_1"]},
+            "block":{"description":"Optional block for selecting difficulty; a JSON string or object.","oneOf":[{"type":"string"},{"type":"object"}]},
+            "json_block":{"type":"boolean","default":false,"description":"Interpret block as a JSON object."}}}),
+    );
+    add(
+        "WorkCancelParams",
+        json!({"type":"object","required":["hash"],"properties":{
+            "hash":{"type":"string","minLength":1,"description":"Block hash whose work generation should stop."}}}),
+    );
+    add(
+        "WorkValidateParams",
+        json!({"type":"object","required":["hash","work"],"properties":{
+            "hash":{"type":"string","minLength":1},
+            "work":{"type":"string","minLength":1},
+            "difficulty":{"type":"string","description":"Optional 16-digit hexadecimal difficulty."},
+            "multiplier":{"type":"number","exclusiveMinimum":0,"description":"Optional positive multiplier; overrides difficulty."},
+            "version":{"type":"string","enum":["work_1"]}}}),
+    );
+    add(
         "EmptyParams",
         json!({"type":"object","properties":{},"additionalProperties":false}),
     );
@@ -1109,6 +1167,25 @@ fn component_schemas() -> serde_json::Map<String, Value> {
             {"type":"object","required":["started"],"description":"Returned when `async` was requested. The block was queued, not processed; the outcome arrives on the `new_unconfirmed_block` topic.","properties":{"started":{"type":"string","const":"1"}}}]}),
     );
     add(
+        "WorkGenerateResult",
+        json!({"type":"object","required":["work","difficulty","multiplier","hash"],"properties":{
+            "work":{"type":"string"},"difficulty":{"type":"string"},
+            "multiplier":{"type":"string"},"hash":{"type":"string"}}}),
+    );
+    add(
+        "WorkCancelResult",
+        json!({"type":"object","required":["success"],"properties":{
+            "success":{"type":"string","const":""}}}),
+    );
+    add(
+        "WorkValidateResult",
+        json!({"type":"object","required":["valid_all","valid_receive","difficulty","multiplier"],"properties":{
+            "valid":{"type":"string","enum":["0","1"],"description":"Present when difficulty or multiplier was supplied."},
+            "valid_all":{"type":"string","enum":["0","1"]},
+            "valid_receive":{"type":"string","enum":["0","1"]},
+            "difficulty":{"type":"string"},"multiplier":{"type":"string"}}}),
+    );
+    add(
         "HistoryEntry",
         json!({"type":"object","required":["type","account","amount","hash"],"description":"Without `raw`, `type` is `send` or `receive` and change and epoch blocks are skipped. With `raw`, it is the block type and every block field is present. For an open block in raw mode, `account` is the source block's account.","properties":{
             "type":{"type":"string"},
@@ -1164,12 +1241,17 @@ fn component_schemas() -> serde_json::Map<String, Value> {
 fn build_openrpc_document(
     profile: &str,
     include_work: bool,
+    include_control: bool,
     include_discovery: bool,
     gateway_url: &str,
 ) -> Value {
     let mut methods = registry()
         .into_iter()
-        .filter(|method| include_work || method.scope != Scope::Work)
+        .filter(|method| match method.scope {
+            Scope::Work => include_work,
+            Scope::Control => include_control,
+            _ => true,
+        })
         .map(openrpc_method)
         .collect::<Vec<_>>();
     if include_discovery {
@@ -1222,11 +1304,25 @@ fn openrpc_method(method: MethodSpec) -> Value {
             {"$ref":"#/components/errors/InternalError"}
         ]
     });
-    if method.name == "process" {
+    if method.name == "process" || method.name == "work_validate" {
         document["x-nano-capability"] = json!({
-            "name": "process",
-            "browser_safe": true,
-            "requires": ["authenticated"]
+            "name": method.name,
+            "browser_safe": method.name == "process",
+            "requires": ["authenticated", "common"]
+        });
+    } else if method.scope == Scope::Work {
+        document["x-nano-capability"] = json!({
+            "name": "work",
+            "browser_safe": false,
+            "requires": ["authenticated", "work"],
+            "enabled_by": "allow_work"
+        });
+    } else if method.scope == Scope::Control {
+        document["x-nano-capability"] = json!({
+            "name": "control",
+            "browser_safe": false,
+            "requires": ["authenticated", "control"],
+            "enabled_by": "allow_control"
         });
     }
     document
@@ -2001,6 +2097,7 @@ impl AppState {
                     openrpc_document_with_auth(
                         &self.config.profile,
                         self.config.allow_work,
+                        self.config.allow_control,
                         self.config.enable_discovery,
                         &self.gateway_url(),
                         self.config.require_common_auth,
@@ -2027,6 +2124,13 @@ impl AppState {
                 "Work generation is disabled",
             ));
         }
+        if spec.scope == Scope::Control && !self.config.allow_control {
+            return Ok(RpcResponse::err(
+                request.id,
+                -32604,
+                "Control methods are disabled",
+            ));
+        }
         // An authentication failure never reaches the node, so it is answered at the
         // transport layer rather than as a node-reported condition.
         let common_auth_required = spec.scope != Scope::Common || self.config.require_common_auth;
@@ -2044,9 +2148,9 @@ impl AppState {
         // transport layer, so it can never appear as a JSON-RPC error body.
         self.guard(spec.name, &params).await?;
         match self.native.call(spec.name, &params).await {
-            // Translation-layer item 1: `result` is the upstream response object,
-            // unchanged. The only check is that it still matches the pinned profile.
-            Ok(result) => {
+            // Forward upstream results unchanged except for the guarded work_generate
+            // alias normalization below, then validate against the pinned profile.
+            Ok(mut result) => {
                 // Only a hash the node accepted starts a cooldown. Recording a
                 // rejected hash would let a caller lock out a block that never
                 // reached the node in the first place.
@@ -2054,6 +2158,15 @@ impl AppState {
                     if let Some(hash) = params.get("hash").and_then(Value::as_str) {
                         self.confirm_guards.record_accepted(hash).await;
                     }
+                }
+                if normalize_work_generate_result(spec.name, &params, &mut result) {
+                    tracing::warn!(
+                        event = "rpc_result_compatibility_remap",
+                        method = spec.name,
+                        upstream_field = "frontier",
+                        contract_field = "hash",
+                        "normalized work_generate result field to match Nano RPC"
+                    );
                 }
                 if validate_result(spec.name, &result) {
                     Ok(RpcResponse::ok(request.id, result))
@@ -2164,7 +2277,9 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
         "account_info" | "receivable" | "account_balance" | "account_history" => "account",
         "accounts_balances" | "accounts_frontiers" | "accounts_receivable" => "accounts",
         "blocks_info" => "hashes",
-        "block_info" | "block_confirm" | "work_generate" => "hash",
+        "block_info" | "block_confirm" | "work_generate" | "work_cancel" | "work_validate" => {
+            "hash"
+        }
         "process" => "block",
         _ => return Ok(()),
     };
@@ -2216,6 +2331,7 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
         "representative",
         "weight",
         "receivable",
+        "use_peers",
         "force",
         "async",
     ] {
@@ -2259,15 +2375,68 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
     }) {
         return Err("invalid parameter: subtype".into());
     }
-    if method == "work_generate"
+    if method == "work_validate"
         && object
-            .get("difficulty")
+            .get("work")
             .and_then(Value::as_str)
             .is_none_or(str::is_empty)
     {
-        return Err("missing required parameter: difficulty".into());
+        return Err("missing required parameter: work".into());
+    }
+    for name in ["difficulty", "account", "version"] {
+        if object.get(name).is_some_and(|value| !value.is_string()) {
+            return Err(format!("invalid parameter: {name}"));
+        }
+    }
+    if object
+        .get("multiplier")
+        .is_some_and(|value| !value.as_f64().is_some_and(|multiplier| multiplier > 0.0))
+    {
+        return Err("invalid parameter: multiplier".into());
+    }
+    if object.get("work").is_some_and(|value| !value.is_string()) {
+        return Err("invalid parameter: work".into());
+    }
+    if object
+        .get("block")
+        .is_some_and(|value| !(value.is_string() || value.is_object()))
+    {
+        return Err("invalid parameter: block".into());
+    }
+    if object
+        .get("version")
+        .and_then(Value::as_str)
+        .is_some_and(|version| version != "work_1")
+    {
+        return Err("invalid parameter: version".into());
     }
     Ok(())
+}
+
+/// Normalize Nano.to's `frontier` alias only when it identifies the exact
+/// work root requested by the caller. A mismatched alias remains invalid.
+fn normalize_work_generate_result(method: &str, params: &Value, result: &mut Value) -> bool {
+    if method != "work_generate" {
+        return false;
+    }
+    let Some(requested_hash) = params.get("hash").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(object) = result.as_object_mut() else {
+        return false;
+    };
+    if object.contains_key("hash") {
+        return false;
+    }
+    let Some(frontier) = object.get("frontier").and_then(Value::as_str) else {
+        return false;
+    };
+    if frontier != requested_hash {
+        return false;
+    }
+    object.remove("frontier");
+    object.insert("hash".into(), Value::String(requested_hash.to_owned()));
+    true
 }
 
 fn has_string(object: &serde_json::Map<String, Value>, name: &str) -> bool {
@@ -2412,6 +2581,17 @@ fn validate_result(method: &str, result: &Value) -> bool {
         "work_generate" => ["hash", "work", "difficulty", "multiplier"]
             .iter()
             .all(|field| has_string(object, field)),
+        "work_cancel" => object.get("success").and_then(Value::as_str) == Some(""),
+        "work_validate" => {
+            ["valid_all", "valid_receive", "difficulty", "multiplier"]
+                .iter()
+                .all(|field| has_string(object, field))
+                && object.get("valid").is_none_or(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|valid| matches!(valid, "0" | "1"))
+                })
+        }
         _ => false,
     }
 }
@@ -2690,6 +2870,7 @@ async fn openrpc_handler(State(state): State<AppState>) -> Response {
     let document = openrpc_document_with_auth(
         &state.config.profile,
         state.config.allow_work,
+        state.config.allow_control,
         state.config.enable_discovery,
         &state.gateway_url(),
         state.config.require_common_auth,
@@ -3437,9 +3618,10 @@ mod tests {
             openrpc_document("nano-node/V28.2", false, true, "http://127.0.0.1:7076/rpc");
         // version, block_count, account_info, receivable, account_balance,
         // accounts_balances, account_history, block_info, blocks_info,
-        // accounts_frontiers, accounts_receivable, block_confirm, process and
-        // rpc.discover. work_generate is filtered out while work is disabled.
-        assert_eq!(document["methods"].as_array().expect("methods").len(), 14);
+        // accounts_frontiers, accounts_receivable, block_confirm, process,
+        // work_validate and rpc.discover. work_generate is filtered out while
+        // work is disabled.
+        assert_eq!(document["methods"].as_array().expect("methods").len(), 15);
     }
 
     #[test]
@@ -3566,6 +3748,7 @@ mod tests {
         let document = openrpc_document_with_auth(
             "nano-node/V28.2",
             false,
+            false,
             true,
             "http://127.0.0.1:8090/rpc",
             false,
@@ -3578,6 +3761,13 @@ mod tests {
             .find(|method| method["name"] == "process")
             .expect("process method");
         assert_eq!(process["x-nano-capability"]["requires"], json!([]));
+        let work_validate = document["methods"]
+            .as_array()
+            .expect("methods")
+            .iter()
+            .find(|method| method["name"] == "work_validate")
+            .expect("work_validate method");
+        assert_eq!(work_validate["x-nano-capability"]["requires"], json!([]));
     }
 
     #[test]
@@ -3644,8 +3834,14 @@ mod tests {
 
     #[test]
     fn registry_and_openrpc_method_inventories_match() {
-        let document =
-            openrpc_document("nano-node/V28.2", true, false, "http://127.0.0.1:7076/rpc");
+        let document = openrpc_document_with_auth(
+            "nano-node/V28.2",
+            true,
+            true,
+            false,
+            "http://127.0.0.1:7076/rpc",
+            true,
+        );
         let advertised = document["methods"]
             .as_array()
             .expect("methods")
@@ -3653,7 +3849,12 @@ mod tests {
             .filter_map(|method| method["name"].as_str())
             .collect::<Vec<_>>();
         for spec in registry() {
-            assert!(spec.schema_provenance.starts_with("profiles/"));
+            assert!(
+                spec.schema_provenance.starts_with("profiles/")
+                    || spec
+                        .schema_provenance
+                        .starts_with("https://docs.nano.org/commands/rpc-protocol/#")
+            );
             assert!(advertised.contains(&spec.name));
         }
         assert_eq!(advertised.len(), registry().len());

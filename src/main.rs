@@ -246,6 +246,7 @@ async fn main() -> anyhow::Result<()> {
             let openrpc = openrpc_document_with_auth(
                 "nano-node/V28.2",
                 false,
+                false,
                 true,
                 "https://gateway.invalid/rpc",
                 true,

@@ -8,6 +8,8 @@ listen: "0.0.0.0:8090"
 
 # Public providers, reached over the container's normal egress. Failover is ordered.
 node_rpc_urls:
+  # Generic URL userinfo is converted to HTTP Basic auth by the gateway client.
+  - "https://${GATEWAY_RPC_UPSTREAM_API_KEY}:@rpc.nano.to/"
   - "https://nanoslo.0x.no/proxy"
   - "https://rainstorm.city/api"
 node_ws_urls:
@@ -23,10 +25,10 @@ profile: "nano-node/V28.2"
 # The browser token goes in NANOSWEEPER_WEB_RPC_GW_API_KEY, which reaches the browser
 # through the served runtime-config.js rather than through a rebuild.
 require_common_auth: false
-auth_public_key: null
+auth_public_key: "${NANOSWEEPER_GATEWAY_AUTH_PUBLIC_KEY}"
 
-allow_work: false
-allow_control: false
+allow_work: true
+allow_control: true
 enable_discovery: true
 enable_browser_ui: true
 enable_inspector: false

@@ -94,6 +94,10 @@ async fn start_native_stub() -> String {
                 Some("work_generate") => {
                     json!({"hash":"A", "work":"B", "difficulty":"C", "multiplier":"1"})
                 }
+                Some("work_cancel") => json!({"success":""}),
+                Some("work_validate") => json!({
+                    "valid_all":"1", "valid_receive":"1", "difficulty":"C", "multiplier":"1"
+                }),
                 _ => json!({"error":"unknown action"}),
             };
             Json(response)
@@ -1926,6 +1930,58 @@ async fn work_generation_authorization_matrix_is_explicit() {
     assert_eq!(failure["error"]["code"], -32000);
     assert_eq!(failure["error"]["message"], "work unavailable");
     assert!(failure["error"].get("data").is_none());
+}
+
+#[tokio::test]
+async fn work_cancel_requires_control_scope_and_control_policy() {
+    let key = generate_signing_key();
+    let mut config = test_config(start_native_stub().await);
+    config.allow_control = true;
+    config.auth_public_key = Some(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.verifying_key().to_bytes()),
+    );
+    let state = AppState::new(config).expect("state");
+    let request = r#"{"jsonrpc":"2.0","method":"work_cancel","params":{"hash":"A"},"id":1}"#;
+    let (missing_status, _) = rpc_status(state.clone(), request, None).await;
+    assert_eq!(missing_status, StatusCode::UNAUTHORIZED);
+
+    let work = sign_paseto(
+        &json!({"aud":"nano-rpc-gateway","scope":"work","exp":4_000_000_000u64}),
+        &key,
+    );
+    let (work_status, _) = rpc_status(state.clone(), request, Some(&work)).await;
+    assert_eq!(work_status, StatusCode::UNAUTHORIZED);
+
+    let control = sign_paseto(
+        &json!({"aud":"nano-rpc-gateway","scope":"control","exp":4_000_000_000u64}),
+        &key,
+    );
+    assert_eq!(
+        rpc_with_auth(state, request, &control).await["result"]["success"],
+        ""
+    );
+}
+
+#[tokio::test]
+async fn work_validate_follows_the_common_auth_policy() {
+    let key = generate_signing_key();
+    let mut config = test_config(start_native_stub().await);
+    config.auth_public_key = Some(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.verifying_key().to_bytes()),
+    );
+    let state = AppState::new(config).expect("state");
+    let request =
+        r#"{"jsonrpc":"2.0","method":"work_validate","params":{"hash":"A","work":"B"},"id":1}"#;
+    let (missing_status, _) = rpc_status(state.clone(), request, None).await;
+    assert_eq!(missing_status, StatusCode::UNAUTHORIZED);
+
+    let common = sign_paseto(
+        &json!({"aud":"nano-rpc-gateway","scope":"common","exp":4_000_000_000u64}),
+        &key,
+    );
+    let response = rpc_with_auth(state, request, &common).await;
+    assert_eq!(response["result"]["valid_all"], "1");
+    assert_eq!(response["result"]["valid_receive"], "1");
 }
 
 #[tokio::test]
