@@ -3353,14 +3353,19 @@ async fn run_ws_bridge_with_confirmation_liveness(
         tokio::time::timeout(Duration::from_secs(5), async {
             while let Some(message) = socket.next().await {
                 let message = message.map_err(|error| GatewayError::UpstreamTransport(error.to_string()))?;
-                if let Message::Text(text) = message {
-                    if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                        if value.get("error").is_some() {
-                            return Err(GatewayError::UpstreamUnavailable("confirmation subscription rejected".into()));
-                        }
-                        if value.get("ack").and_then(Value::as_str) == Some("subscribe") {
-                            return Ok(());
-                        }
+                // Some public proxies send JSON acknowledgements in binary frames,
+                // just as they do confirmations. Decode both during the handshake.
+                let value = match message {
+                    Message::Text(text) => serde_json::from_str::<Value>(&text),
+                    Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes),
+                    _ => continue,
+                };
+                if let Ok(value) = value {
+                    if value.get("error").is_some() {
+                        return Err(GatewayError::UpstreamUnavailable("confirmation subscription rejected".into()));
+                    }
+                    if value.get("ack").and_then(Value::as_str) == Some("subscribe") {
+                        return Ok(());
                     }
                 }
             }
@@ -4689,8 +4694,10 @@ node_ws_urls:
                 .expect("subscribe text")
                 .contains("confirmation"));
             socket
-                .send(Message::Text(
-                    json!({"ack":"subscribe","topic":"confirmation"}).to_string(),
+                .send(Message::Binary(
+                    json!({"ack":"subscribe","topic":"confirmation"})
+                        .to_string()
+                        .into_bytes(),
                 ))
                 .await
                 .expect("ack");
