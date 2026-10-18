@@ -18,6 +18,16 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tower::ServiceExt;
 
+async fn wait_for_confirmation_session(state: &AppState) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !state.events.is_ready() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("acknowledged confirmation session");
+}
+
 async fn start_native_stub() -> String {
     let router = Router::new().route(
         "/",
@@ -523,6 +533,8 @@ async fn node_rate_limit_cools_the_upstream_down_without_retrying_elsewhere() {
 async fn websocket_bridge_uses_standby_after_primary_disconnects() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("ws bind");
     let good_address = listener.local_addr().expect("ws address");
+    let (publish, publish_rx) = tokio::sync::oneshot::channel();
+    let (close, close_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.expect("ws client");
         let mut socket = tokio_tungstenite::accept_async(stream)
@@ -539,9 +551,11 @@ async fn websocket_bridge_uses_standby_after_primary_disconnects() {
             ))
             .await
             .expect("ack");
+        publish_rx.await.expect("subscriber registered");
         socket.send(tokio_tungstenite::tungstenite::Message::Text(
             json!({"topic":"confirmation","message":{"hash":"STANDBY", "account":"nano_sender", "block":{"type":"state","subtype":"send","link_as_account":"nano_player"}}}).to_string()
         )).await.expect("standby confirmation");
+        close_rx.await.expect("close trigger");
         socket.close(None).await.expect("close");
     });
     let native = start_native_stub().await;
@@ -551,21 +565,18 @@ async fn websocket_bridge_uses_standby_after_primary_disconnects() {
         ..test_config("http://127.0.0.1:1".into())
     })
     .expect("state");
-    let request = axum::http::Request::builder()
-        .uri("/events/confirmations?accounts=nano_player")
-        .body(axum::body::Body::empty())
-        .expect("SSE request");
-    let mut body = app(state.clone())
-        .oneshot(request)
-        .await
-        .expect("SSE response")
-        .into_body();
     assert!(nano_rpc_gateway::run_ws_bridge(state.clone())
         .await
         .is_err());
+    let (status, _) = get_stream(state.clone(), "").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(state.native.active_index(), 0);
-    assert!(nano_rpc_gateway::run_ws_bridge(state.clone()).await.is_ok());
-    server.await.expect("ws server");
+    let bridge = tokio::spawn(nano_rpc_gateway::run_ws_bridge(state.clone()));
+    wait_for_confirmation_session(&state).await;
+    let (status, response) = get_stream(state.clone(), "?accounts=nano_player").await;
+    assert_eq!(status, StatusCode::OK);
+    let mut body = response.into_body();
+    publish.send(()).expect("publish standby event");
     let transcript = tokio::time::timeout(std::time::Duration::from_secs(1), async {
         let mut transcript = String::new();
         while !transcript.contains("STANDBY") {
@@ -583,6 +594,15 @@ async fn websocket_bridge_uses_standby_after_primary_disconnects() {
     .await
     .expect("filtered standby confirmation");
     assert!(transcript.contains("nano_player"));
+    close.send(()).expect("close upstream");
+    bridge.await.expect("bridge task").expect("bridge result");
+    server.await.expect("server");
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
+            .await
+            .expect("SSE closes promptly")
+            .is_none()
+    );
     assert_eq!(
         state
             .native
@@ -1144,8 +1164,179 @@ async fn asyncapi_endpoint_documents_receive_only_sse_messages() {
 }
 
 #[tokio::test]
+async fn unavailable_confirmation_streams_return_retryable_503_for_both_verbs() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    for (status, response) in [
+        get_stream(state.clone(), "").await,
+        post_stream(state.clone(), json!({})).await,
+    ] {
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()["retry-after"], "2");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).expect("JSON")["status"],
+            "not_ready"
+        );
+    }
+    assert_eq!(state.metrics.active_streams.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        state
+            .native
+            .call("account_info", &json!({"account":"nano_test"}))
+            .await
+            .expect("RPC unaffected")["frontier"],
+        "A"
+    );
+}
+
+#[tokio::test]
+async fn retired_sse_sessions_close_before_polling_even_after_fast_reconnect() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let first = state.events.start_session();
+    let (_, mut old) = get_stream(state.clone(), "").await;
+    state
+        .events
+        .publish("nano.confirmation", json!({"hash":"QUEUED"}))
+        .await;
+    drop(first);
+    let second = state.events.start_session();
+    state
+        .events
+        .publish("nano.confirmation", json!({"hash":"OTHER_SESSION"}))
+        .await;
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), old.frame())
+            .await
+            .expect("old session must end immediately")
+            .is_none()
+    );
+    assert_eq!(state.metrics.active_streams.load(Ordering::Relaxed), 0);
+    let (status, mut new) = get_stream(state.clone(), "").await;
+    assert_eq!(status, StatusCode::OK);
+    state
+        .events
+        .publish("nano.confirmation", json!({"hash":"FRESH"}))
+        .await;
+    let event = next_event(&mut new).await;
+    assert!(event.contains("FRESH"));
+    assert!(!event.contains("QUEUED") && !event.contains("OTHER_SESSION"));
+    drop(second);
+    assert!(new.frame().await.is_none());
+}
+
+#[tokio::test]
+async fn dropping_unpolled_sse_bodies_releases_the_active_stream_count() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
+    let (_, response) = get_stream(state.clone(), "").await;
+    assert_eq!(state.metrics.active_streams.load(Ordering::Relaxed), 1);
+    drop(response);
+    assert_eq!(state.metrics.active_streams.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn registration_racing_retirement_cannot_attach_to_the_next_session() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    for _ in 0..64 {
+        let session = state.events.start_session();
+        let request = tokio::spawn(get_stream(state.clone(), ""));
+        drop(session);
+        let (status, mut response) = request.await.expect("request task");
+        assert!(matches!(
+            status,
+            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+        ));
+        let next = state.events.start_session();
+        if status == StatusCode::OK {
+            state
+                .events
+                .publish("nano.confirmation", json!({"hash":"NEXT"}))
+                .await;
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), response.frame())
+                    .await
+                    .expect("retired body closes")
+                    .is_none()
+            );
+        }
+        drop(response);
+        drop(next);
+        assert_eq!(state.metrics.active_streams.load(Ordering::Relaxed), 0);
+    }
+}
+
+#[tokio::test]
+async fn ws_close_transport_error_and_task_abort_close_every_sse_subscriber() {
+    for failure in ["close", "transport", "abort"] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = listener.local_addr().expect("address");
+        let (fail, fail_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut ws = tokio_tungstenite::accept_async(stream).await.expect("WS");
+            ws.next().await.expect("subscribe").expect("frame");
+            ws.send(tokio_tungstenite::tungstenite::Message::Binary(
+                json!({"ack":"subscribe"}).to_string().into_bytes(),
+            ))
+            .await
+            .expect("binary ack");
+            fail_rx.await.expect("failure trigger");
+            if failure == "close" {
+                ws.close(None).await.expect("close");
+            }
+            // Dropping without a close frame exercises transport failure.
+        });
+        let state = AppState::new(Config {
+            node_ws_urls: vec![format!("ws://{address}")],
+            ..test_config(start_native_stub().await)
+        })
+        .expect("state");
+        let bridge = tokio::spawn(nano_rpc_gateway::run_ws_bridge(state.clone()));
+        wait_for_confirmation_session(&state).await;
+        let (_, mut first) = get_stream(state.clone(), "").await;
+        let (_, mut second) = post_stream(state.clone(), json!({})).await;
+        if failure == "abort" {
+            bridge.abort();
+        } else {
+            fail.send(()).expect("trigger failure");
+        }
+        let result = bridge.await;
+        if failure == "abort" {
+            assert!(result.expect_err("aborted").is_cancelled());
+        } else if failure == "transport" {
+            assert!(result.expect("task").is_err());
+        } else {
+            result.expect("task").expect("clean close");
+        }
+        for response in [&mut first, &mut second] {
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), response.frame())
+                    .await
+                    .expect("SSE must close promptly")
+                    .is_none(),
+                "{failure}"
+            );
+        }
+        assert!(!state.events.is_ready());
+        assert_eq!(state.metrics.active_streams.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            get_stream(state, "").await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        server.abort();
+    }
+}
+
+#[tokio::test]
 async fn confirmation_stream_uses_event_stream_content_type() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     let request = axum::http::Request::builder()
         .method("GET")
         .uri("/events/confirmations")
@@ -1165,6 +1356,7 @@ async fn confirmation_stream_accepts_a_hundred_accounts_and_rejects_one_more() {
     // The ceiling is what an HTTP request line can carry, so 100 accounts has to
     // pass end to end rather than only in a unit test.
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     let hundred = (0..100)
         .map(|index| format!("nano_{index:0>60}"))
         .collect::<Vec<_>>()
@@ -1283,6 +1475,7 @@ async fn confirmation_stream_ignores_a_last_event_id_cursor() {
     // The node offers no replay, so a cursor cannot resume anything and a subscriber
     // that expects one must not be given history it cannot reconcile.
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     state
         .events
         .publish(
@@ -1330,6 +1523,7 @@ async fn confirmation_stream_ignores_a_last_event_id_cursor() {
 #[tokio::test]
 async fn confirmation_stream_carries_the_event_time_and_no_added_fields() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     let request = axum::http::Request::builder()
         .method("GET")
         .uri("/events/confirmations")
@@ -1377,6 +1571,7 @@ async fn confirmation_stream_closes_when_the_subscriber_falls_behind() {
     // There is no replay to fall back on, so an overflow closes the stream. The
     // client reconnects and reconciles with accounts_frontiers and account_history.
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     let request = axum::http::Request::builder()
         .method("GET")
         .uri("/events/confirmations")
@@ -1418,6 +1613,7 @@ async fn confirmation_stream_closes_when_the_subscriber_falls_behind() {
 #[tokio::test]
 async fn confirmation_stream_releases_active_stream_metric_when_cancelled() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     state
         .events
         .publish("nano.confirmation", json!({"hash": "cancel-test"}))
@@ -1483,6 +1679,7 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
     let ws_listener = TcpListener::bind("127.0.0.1:0").await.expect("ws bind");
     let ws_address = ws_listener.local_addr().expect("ws address");
     let (send_confirmation, receive_confirmation) = tokio::sync::oneshot::channel();
+    let (close_ws, finish_ws) = tokio::sync::oneshot::channel();
     let ws_task = tokio::spawn(async move {
         let (stream, _) = ws_listener.accept().await.expect("ws client");
         let mut socket = tokio_tungstenite::accept_async(stream)
@@ -1525,6 +1722,7 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
             ))
             .await
             .expect("confirmation");
+        finish_ws.await.expect("close fixture");
         socket.close(None).await.expect("upstream close");
     });
 
@@ -1565,6 +1763,9 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
             .expect("gateway server")
     });
 
+    let bridge_state = state.clone();
+    let bridge = tokio::spawn(async move { nano_rpc_gateway::run_ws_bridge(bridge_state).await });
+    wait_for_confirmation_session(&state).await;
     let client = reqwest::Client::new();
     let base = format!("http://{gateway_address}");
     let mut sse_response = client
@@ -1575,8 +1776,6 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
         .await
         .expect("SSE connect");
     assert_eq!(sse_response.status(), reqwest::StatusCode::OK);
-    let bridge_state = state.clone();
-    let bridge = tokio::spawn(async move { nano_rpc_gateway::run_ws_bridge(bridge_state).await });
 
     let discover: Value = client
         .post(format!("{base}/rpc"))
@@ -1709,10 +1908,11 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
     // When the upstream WebSocket closes, the client stream closes with it, as a
     // node closing a WebSocket would. Nothing is announced, so a client reconciles
     // with accounts_frontiers and account_history rather than waiting for a signal.
+    close_ws.send(()).expect("close WS");
     let closed =
         tokio::time::timeout(std::time::Duration::from_secs(10), sse_response.chunk()).await;
     assert!(
-        closed.is_err() || closed.as_ref().expect("chunk").is_err(),
+        matches!(closed, Ok(Ok(None))),
         "the client stream must close when the upstream WebSocket closes"
     );
 
@@ -1731,6 +1931,8 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
 
     let ws_listener = TcpListener::bind("127.0.0.1:0").await.expect("ws bind");
     let ws_address = ws_listener.local_addr().expect("ws address");
+    let (close_ws, finish_ws) = tokio::sync::oneshot::channel();
+    let (send_event, start_event) = tokio::sync::oneshot::channel();
     let ws_task = tokio::spawn(async move {
         let (stream, _) = ws_listener.accept().await.expect("ws client");
         let mut socket = tokio_tungstenite::accept_async(stream)
@@ -1747,7 +1949,7 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
             ))
             .await
             .expect("subscribe ack");
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        start_event.await.expect("all subscribers registered");
         socket
             .send(tokio_tungstenite::tungstenite::Message::Text(
                 json!({
@@ -1758,6 +1960,7 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
             ))
             .await
             .expect("confirmation");
+        finish_ws.await.expect("close fixture");
         socket.close(None).await.expect("ws close");
     });
 
@@ -1777,6 +1980,9 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
             .expect("gateway server")
     });
 
+    let bridge_state = state.clone();
+    let bridge = tokio::spawn(async move { nano_rpc_gateway::run_ws_bridge(bridge_state).await });
+    wait_for_confirmation_session(&state).await;
     let client = reqwest::Client::new();
     let base = format!("http://{gateway_address}");
     let mut responses = Vec::with_capacity(clients);
@@ -1790,8 +1996,7 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
         responses.push(response);
     }
 
-    let bridge_state = state.clone();
-    let bridge = tokio::spawn(async move { nano_rpc_gateway::run_ws_bridge(bridge_state).await });
+    send_event.send(()).expect("publish");
     let started = Instant::now();
     let readers = responses.into_iter().map(|mut response| async move {
         let mut transcript = String::new();
@@ -1816,6 +2021,7 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
         state.metrics.active_streams.load(Ordering::Relaxed),
         clients as u64
     );
+    close_ws.send(()).expect("close WS");
     bridge.await.expect("bridge task").expect("bridge result");
     ws_task.await.expect("ws task");
     gateway_task.abort();
@@ -1838,7 +2044,7 @@ async fn readiness_tracks_native_subscription_state() {
         axum::http::StatusCode::SERVICE_UNAVAILABLE
     );
 
-    state.upstream_ready.store(true, Ordering::Relaxed);
+    let _session = state.events.start_session();
     let request = axum::http::Request::builder()
         .method("GET")
         .uri("/readyz")
@@ -2270,6 +2476,7 @@ async fn post_body_variant_carries_an_account_set_a_request_line_cannot() {
     // EventSource only issues GET, so a client whose filter outgrows the request line
     // posts the same options as a body. Both forms return the same stream.
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     let big = (0..5000)
         .map(|index| format!("nano_{index:0>60}"))
         .collect::<Vec<_>>();
@@ -2312,6 +2519,7 @@ async fn both_verbs_reject_an_incompatible_filter_and_unknown_options() {
 #[tokio::test]
 async fn confirmation_type_and_response_options_are_applied_to_the_payload() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     let (status, mut body) = post_stream(
         state.clone(),
         json!({"confirmation_type": "active", "include_election_info": true}),
@@ -2355,6 +2563,7 @@ async fn confirmation_type_and_response_options_are_applied_to_the_payload() {
 #[tokio::test]
 async fn sideband_and_block_fields_appear_only_when_asked() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     let (status, mut body) = post_stream(
         state.clone(),
         json!({"include_sideband_info": true, "include_election_info": false}),
@@ -2399,6 +2608,7 @@ async fn sideband_and_block_fields_appear_only_when_asked() {
 #[tokio::test]
 async fn the_get_form_filters_by_account_the_same_way() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
     let (status, mut body) = get_stream(state.clone(), "?accounts=nano_watched").await;
     assert_eq!(status, axum::http::StatusCode::OK);
     state

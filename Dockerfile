@@ -43,6 +43,22 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
  && cp target/release/nano-rpc-gateway /usr/local/bin/nano-rpc-gateway
 
 
+# Optional test target; the default runtime below never contains the fault relay.
+FROM builder AS fault-relay-builder
+COPY examples ./examples
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    cargo build --release --locked --example ws_fault_relay \
+ && cp target/release/examples/ws_fault_relay /usr/local/bin/ws_fault_relay
+
+FROM debian:bookworm-slim AS ws-fault-relay
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=fault-relay-builder /usr/local/bin/ws_fault_relay /usr/local/bin/ws_fault_relay
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/ws_fault_relay"]
+
 FROM debian:bookworm-slim AS runtime
 
 # ca-certificates is required, not optional: every node_rpc_url and node_ws_url in a

@@ -80,7 +80,43 @@ terminates upstream, set `public_url` to the `https` address so the published
 contracts do not advertise the loopback listener.
 
 `/events/confirmations` is a live, non-replayable stream. When it closes,
-reconcile state with JSON-RPC before applying new events. Rotate PASETO signing
+open a replacement stream, buffer its notifications, and reconcile state with
+`accounts_frontiers` and `account_history` before applying buffered or new events.
+Each stream belongs to one acknowledged upstream WebSocket session. Every loss
+of that session closes its streams, including heartbeat and confirmation-delivery
+timeouts; a fast failover does not preserve the old streams across the gap.
+This follows the node's disconnect and reconciliation semantics:
+<https://docs.nano.org/integration-guides/websockets/>.
+
+While no upstream subscription is acknowledged, valid GET and POST stream
+requests return HTTP 503 with the same JSON body as `/readyz`, `Retry-After: 2`,
+and `Cache-Control: no-store`. Retry with backoff; these requests do not alter
+the background WS provider rotation or cooldowns. A native browser `EventSource`
+stops reconnecting after a non-200 response, so its owner must recreate it after
+an error with `readyState === EventSource.CLOSED`. Fetch-based clients must
+likewise retry non-200 responses and reconcile after an interruption. A response
+that was already streaming ends without an invented error event or replay cursor.
+With `log_rpc` enabled, `generation` links stream creation/closure to the upstream
+session and `close_reason` distinguishes upstream loss, subscriber lag, and client
+disconnects.
+
+For a controlled deployment check, build the optional `ws-fault-relay` Docker
+target and run it privately on the gateway's Compose network. Pass the original
+WS URLs as repeated `--upstream` arguments, and temporarily replace them in a
+copy of the gateway configuration with `ws://nano-as3-ws-relay:8080/0`, `/1`, etc.
+Do not publish relay ports: port 8081 has unauthenticated test-only pause/resume
+controls. Keep the original configuration available for restoration.
+
+Run `python3 scripts/verify-sse-continuity.py --help` for the deployed verification
+arguments. The script requires `curl`, SSH to the Docker host, and `xno-skills`;
+it sends exactly three transfers of 0.00000001 XNO between the supplied local
+agent wallets. It verifies public HTTP/1.1 and HTTP/2 delivery, stream termination
+during a five-second relay outage, retryable 503s, unaffected RPC, recovery, and
+receive confirmations. Local PoW time is reported separately from SSE latency.
+Afterward restore the original WS configuration, recreate only the gateway, and
+remove the private relay. The default gateway image contains no relay executable.
+
+Rotate PASETO signing
 keys by replacing the configured verification key and issuing short-lived
 tokens; the gateway stores no token revocation DB.
 

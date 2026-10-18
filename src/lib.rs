@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{
@@ -45,6 +45,7 @@ use tokio_tungstenite::{
         Message,
     },
 };
+use tokio_util::sync::CancellationToken;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
@@ -1773,7 +1774,28 @@ fn websocket_connect_request(endpoint: &str) -> Result<TungsteniteRequest<()>, G
 /// that falls behind is closed rather than told about it, and it reconciles with
 /// accounts_frontiers and account_history when it reconnects.
 pub struct EventHub {
+    current: watch::Sender<Option<Arc<ConfirmationSession>>>,
+    next_generation: Arc<AtomicU64>,
+    capacity: usize,
+}
+
+struct ConfirmationSession {
+    generation: u64,
     tx: broadcast::Sender<NanoEvent>,
+    cancelled: CancellationToken,
+}
+
+/// Owns one acknowledged upstream subscription. Dropping it closes its SSE streams,
+/// including when the bridge future is cancelled before its normal cleanup runs.
+pub struct ConfirmationSessionLease {
+    hub: EventHub,
+    session: Arc<ConfirmationSession>,
+}
+
+struct ConfirmationSubscription {
+    receiver: broadcast::Receiver<NanoEvent>,
+    cancelled: CancellationToken,
+    generation: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1794,17 +1816,88 @@ impl EventHub {
     }
     /// A subscriber that falls this far behind is closed rather than told about it.
     pub fn with_capacity(capacity: usize) -> Self {
-        let (tx, _) = broadcast::channel(capacity.max(1));
-        Self { tx }
+        let (current, _) = watch::channel(None);
+        Self {
+            current,
+            next_generation: Arc::new(AtomicU64::new(1)),
+            capacity: capacity.max(1),
+        }
     }
+
+    /// Begin a session only after the node acknowledges the subscription.
+    /// The owner must retain the lease until upstream continuity ends.
+    pub fn start_session(&self) -> ConfirmationSessionLease {
+        let (tx, _) = broadcast::channel(self.capacity);
+        let session = Arc::new(ConfirmationSession {
+            generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
+            tx,
+            cancelled: CancellationToken::new(),
+        });
+        self.current.send_modify(|current| {
+            if let Some(previous) = current.take() {
+                previous.cancelled.cancel();
+            }
+            *current = Some(session.clone());
+        });
+        ConfirmationSessionLease {
+            hub: self.clone(),
+            session,
+        }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.current.borrow().is_some()
+    }
+
     pub async fn publish(&self, event: impl Into<String>, data: Value) -> NanoEvent {
-        let event = event.into();
-        let item = NanoEvent { event, data };
-        let _ = self.tx.send(item.clone());
+        let item = NanoEvent {
+            event: event.into(),
+            data,
+        };
+        if let Some(session) = self.current.borrow().as_ref() {
+            let _ = session.tx.send(item.clone());
+        }
         item
     }
-    fn subscribe(&self) -> broadcast::Receiver<NanoEvent> {
-        self.tx.subscribe()
+
+    fn subscribe(&self) -> Option<ConfirmationSubscription> {
+        // The watch read guard serializes registration with session retirement.
+        // A subscriber can receive this session's cancellation, never a later session.
+        let current = self.current.borrow();
+        let session = current.as_ref()?;
+        Some(ConfirmationSubscription {
+            receiver: session.tx.subscribe(),
+            cancelled: session.cancelled.clone(),
+            generation: session.generation,
+        })
+    }
+}
+
+impl ConfirmationSessionLease {
+    fn publish(&self, event: impl Into<String>, data: Value) {
+        if !self.session.cancelled.is_cancelled() {
+            let _ = self.session.tx.send(NanoEvent {
+                event: event.into(),
+                data,
+            });
+        }
+    }
+}
+
+impl Drop for ConfirmationSessionLease {
+    fn drop(&mut self) {
+        self.hub.current.send_if_modified(|current| {
+            self.session.cancelled.cancel();
+            if current
+                .as_ref()
+                .is_some_and(|session| Arc::ptr_eq(session, &self.session))
+            {
+                *current = None;
+                true
+            } else {
+                false
+            }
+        });
     }
 }
 
@@ -1944,7 +2037,6 @@ pub struct AppState {
     pub events: EventHub,
     pub metrics: Metrics,
     pub verifying_key: Option<VerifyingKey>,
-    pub upstream_ready: Arc<AtomicBool>,
     upstream_seen: Arc<AtomicBool>,
     ws_selected: Arc<Mutex<Option<String>>>,
     // RPC and WebSocket providers have independent availability and ordering.
@@ -1969,6 +2061,8 @@ struct ActiveStreamGuard {
     log_rpc: bool,
     started: Instant,
     account_filter_count: usize,
+    generation: u64,
+    close_reason: &'static str,
 }
 
 struct RequestMetricsGuard {
@@ -1996,6 +2090,8 @@ impl Drop for ActiveStreamGuard {
                 event = "sse_session_closed",
                 duration_ms = self.started.elapsed().as_millis() as u64,
                 account_filter_count = self.account_filter_count,
+                generation = self.generation,
+                close_reason = self.close_reason,
                 "SSE session closed"
             );
         }
@@ -2058,7 +2154,6 @@ impl AppState {
             confirm_guards: Arc::new(ConfirmGuards::new()),
             config,
             verifying_key,
-            upstream_ready: Arc::new(AtomicBool::new(false)),
             upstream_seen: Arc::new(AtomicBool::new(false)),
             ws_selected: Arc::new(Mutex::new(None)),
         })
@@ -2755,22 +2850,26 @@ fn viewer_redirect(prefix: &str, schema_url: &str) -> Response {
 }
 
 async fn ready_handler(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
-    if state.upstream_ready.load(Ordering::Relaxed) {
+    if state.events.is_ready() {
         (StatusCode::OK, Json(json!({"status":"ready"})))
     } else {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(
-                json!({"status":"not_ready","reason":"native WebSocket subscription unavailable"}),
-            ),
-        )
+        confirmation_unavailable()
     }
+}
+
+fn confirmation_unavailable() -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({
+            "status":"not_ready", "reason":"native WebSocket subscription unavailable"
+        })),
+    )
 }
 
 async fn metrics_handler(
     State(state): State<AppState>,
 ) -> ([(header::HeaderName, &'static str); 1], String) {
-    let ready = u8::from(state.upstream_ready.load(Ordering::Relaxed));
+    let ready = u8::from(state.events.is_ready());
     (
         [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
         format!(
@@ -3198,6 +3297,21 @@ async fn sse_handler(
         Err(message) => return bad_request(&state, message),
     };
 
+    let Some(ConfirmationSubscription {
+        mut receiver,
+        cancelled,
+        generation,
+    }) = state.events.subscribe()
+    else {
+        let mut response = confirmation_unavailable().into_response();
+        response
+            .headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from_static("2"));
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        return response;
+    };
     state.metrics.active_streams.fetch_add(1, Ordering::Relaxed);
     let account_filter_count = options.accounts.as_ref().map_or(0, Vec::len);
     let log_rpc = state.config.log_rpc;
@@ -3212,33 +3326,46 @@ async fn sse_handler(
             include_block = options.include_block,
             include_election_info = options.include_election_info,
             include_sideband_info = options.include_sideband_info,
-            upstream_ws_circuit = if state.upstream_ready.load(Ordering::Acquire) {
-                "existing"
-            } else {
-                "establishing"
-            },
+            upstream_ws_circuit = "existing",
+            generation,
             "SSE session created"
         );
     }
-    let mut receiver = state.events.subscribe();
-    let active_streams = state.metrics.active_streams.clone();
+    // Construct outside the generator so dropping an unpolled body releases it too.
+    let guard = ActiveStreamGuard {
+        active_streams: state.metrics.active_streams.clone(),
+        log_rpc,
+        started,
+        account_filter_count,
+        generation,
+        close_reason: "client_disconnected",
+    };
     let output = stream! {
-        let _guard = ActiveStreamGuard {
-            active_streams,
-            log_rpc,
-            started,
-            account_filter_count,
-        };
+        let mut guard = guard;
         loop {
-            match receiver.recv().await {
+            let received = tokio::select! {
+                biased;
+                _ = cancelled.cancelled() => {
+                    guard.close_reason = "upstream_session_lost";
+                    break;
+                }
+                received = receiver.recv() => received,
+            };
+            match received {
                 Ok(item) if options.matches(&item) => {
                     yield Ok::<Event, Infallible>(sse_event(options.project(&item)));
                 }
                 Ok(_) => {}
                 // A subscriber that cannot keep up is closed, not told about it.
                 // The node offers no replay, so there is nothing to catch up with.
-                Err(broadcast::error::RecvError::Lagged(_)) => break,
-                Err(broadcast::error::RecvError::Closed) => break,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    guard.close_reason = "subscriber_lagged";
+                    break;
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    guard.close_reason = "upstream_session_lost";
+                    break;
+                }
             }
         }
     };
@@ -3273,7 +3400,6 @@ async fn run_ws_bridge_with_confirmation_liveness(
     state: AppState,
     confirmation_liveness: Duration,
 ) -> Result<(), GatewayError> {
-    state.upstream_ready.store(false, Ordering::Relaxed);
     let mut connected = false;
     let mut ws_index = None;
     let mut selected_ws_url = None;
@@ -3390,7 +3516,7 @@ async fn run_ws_bridge_with_confirmation_liveness(
                 "upstream WebSocket circuit connected"
             );
         }
-        state.upstream_ready.store(true, Ordering::Relaxed);
+        let session = state.events.start_session();
 
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
         heartbeat.tick().await;
@@ -3436,14 +3562,13 @@ async fn run_ws_bridge_with_confirmation_liveness(
                     confirmation_deadline
                         .as_mut()
                         .reset(tokio::time::Instant::now() + confirmation_liveness);
-                    state.events.publish("nano.confirmation", event).await;
+                    session.publish("nano.confirmation", event);
                 }
             }
         }
         Ok(())
     }
     .await;
-    state.upstream_ready.store(false, Ordering::Relaxed);
     if let Some(index) = ws_index {
         state.mark_ws_unhealthy(index).await;
     }
@@ -3594,7 +3719,19 @@ pub fn playground_url(gateway_url: &str, schema_url: Option<&str>, local: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use http_body_util::BodyExt;
     use tokio_tungstenite::accept_async;
+
+    async fn acknowledged_sse_body(state: &AppState) -> axum::body::Body {
+        let mut sessions = state.events.current.subscribe();
+        tokio::time::timeout(Duration::from_secs(1), sessions.wait_for(|s| s.is_some()))
+            .await
+            .expect("ack timeout")
+            .expect("session");
+        sse_handler(State(state.clone()), Method::GET, None, None)
+            .await
+            .into_body()
+    }
 
     #[test]
     fn shipped_example_config_parses_and_validates() {
@@ -4508,9 +4645,26 @@ node_ws_urls:
     }
 
     #[tokio::test]
+    async fn dropping_an_old_session_lease_cannot_retire_its_replacement() {
+        let hub = EventHub::new();
+        let old = hub.start_session();
+        let old_subscription = hub.subscribe().expect("old session");
+        let replacement = hub.start_session();
+        let current = hub.subscribe().expect("replacement session");
+        assert!(old_subscription.cancelled.is_cancelled());
+        drop(old);
+        assert!(hub.is_ready());
+        assert!(!current.cancelled.is_cancelled());
+        drop(replacement);
+        assert!(!hub.is_ready());
+        assert!(current.cancelled.is_cancelled());
+    }
+
+    #[tokio::test]
     async fn event_hub_fans_out_live_confirmations_without_retaining_them() {
         let hub = EventHub::new();
-        let mut receiver = hub.subscribe();
+        let _session = hub.start_session();
+        let mut receiver = hub.subscribe().expect("session").receiver;
         hub.publish("nano.confirmation", json!({"hash":"a"})).await;
         hub.publish("nano.confirmation", json!({"hash":"b"})).await;
         assert_eq!(receiver.recv().await.expect("first").data["hash"], "a");
@@ -4523,7 +4677,8 @@ node_ws_urls:
         // guide requires integrations to dedupe by hash outside the node. The gateway
         // does not do that for them: every event it receives is delivered.
         let hub = EventHub::new();
-        let mut receiver = hub.subscribe();
+        let _session = hub.start_session();
+        let mut receiver = hub.subscribe().expect("session").receiver;
         hub.publish("nano.confirmation", json!({"hash":"a"})).await;
         hub.publish("nano.confirmation", json!({"hash":"a"})).await;
         assert_eq!(receiver.recv().await.expect("first").data["hash"], "a");
@@ -4535,7 +4690,8 @@ node_ws_urls:
         // A subscriber that cannot keep up is closed rather than told about it. The
         // node offers no replay, so there is nothing to catch up with.
         let hub = EventHub::with_capacity(1);
-        let mut receiver = hub.subscribe();
+        let _session = hub.start_session();
+        let mut receiver = hub.subscribe().expect("session").receiver;
         hub.publish("nano.confirmation", json!({"hash": "a"})).await;
         hub.publish("nano.confirmation", json!({"hash": "b"})).await;
         assert!(matches!(
@@ -4612,15 +4768,24 @@ node_ws_urls:
             ..Config::default()
         })
         .expect("state");
-        let error = tokio::time::timeout(
-            Duration::from_secs(34),
-            run_ws_bridge_with_confirmation_liveness(state.clone(), Duration::from_secs(40)),
-        )
-        .await
-        .expect("bounded heartbeat")
-        .expect_err("missing pong");
+        let bridge = tokio::spawn(run_ws_bridge_with_confirmation_liveness(
+            state.clone(),
+            Duration::from_secs(40),
+        ));
+        let mut sse = acknowledged_sse_body(&state).await;
+        let error = tokio::time::timeout(Duration::from_secs(34), bridge)
+            .await
+            .expect("bounded heartbeat")
+            .expect("bridge task")
+            .expect_err("missing pong");
         assert!(error.to_string().contains("heartbeat timed out"));
-        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert!(!state.events.is_ready());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), sse.frame())
+                .await
+                .expect("SSE EOF")
+                .is_none()
+        );
         assert_eq!(state.active_ws_url().await.expect("standby").0, 1);
         assert_eq!(state.native.active_index(), 0);
         server.abort();
@@ -4649,15 +4814,26 @@ node_ws_urls:
         })
         .expect("state");
 
-        let error =
-            run_ws_bridge_with_confirmation_liveness(state.clone(), Duration::from_millis(50))
-                .await
-                .expect_err("silent upstream must fail delivery liveness");
+        let bridge = tokio::spawn(run_ws_bridge_with_confirmation_liveness(
+            state.clone(),
+            Duration::from_millis(250),
+        ));
+        let mut sse = acknowledged_sse_body(&state).await;
+        let error = bridge
+            .await
+            .expect("bridge task")
+            .expect_err("silent upstream must fail delivery liveness");
 
         assert!(error
             .to_string()
             .contains("confirmation delivery timed out"));
-        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert!(!state.events.is_ready());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), sse.frame())
+                .await
+                .expect("SSE EOF")
+                .is_none()
+        );
         assert_eq!(state.active_ws_url().await.expect("standby").0, 1);
         assert_eq!(state.native.active_index(), 0);
         server.abort();
@@ -4670,9 +4846,9 @@ node_ws_urls:
             ..Config::default()
         };
         let state = AppState::new(config).expect("state");
-        let mut receiver = state.events.subscribe();
+        assert!(state.events.subscribe().is_none());
         assert!(run_ws_bridge(state.clone()).await.is_err());
-        assert!(receiver.try_recv().is_err());
+        assert!(state.events.subscribe().is_none());
     }
 
     #[tokio::test]
@@ -4681,6 +4857,7 @@ node_ws_urls:
             .await
             .expect("websocket listener");
         let address = listener.local_addr().expect("listener address");
+        let (deliver, ready_to_deliver) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.expect("websocket client");
             let mut socket = accept_async(stream).await.expect("websocket handshake");
@@ -4701,6 +4878,7 @@ node_ws_urls:
                 ))
                 .await
                 .expect("ack");
+            ready_to_deliver.await.expect("subscriber registered");
             socket
                 .send(Message::Ping(vec![1, 2, 3]))
                 .await
@@ -4737,8 +4915,15 @@ node_ws_urls:
             ..Config::default()
         };
         let state = AppState::new(config).expect("state");
-        let mut receiver = state.events.subscribe();
-        assert!(run_ws_bridge(state.clone()).await.is_ok());
+        let mut sessions = state.events.current.subscribe();
+        let bridge = tokio::spawn(run_ws_bridge(state.clone()));
+        sessions
+            .wait_for(|session| session.is_some())
+            .await
+            .expect("acknowledged");
+        let mut receiver = state.events.subscribe().expect("session").receiver;
+        deliver.send(()).expect("deliver");
+        assert!(bridge.await.expect("bridge task").is_ok());
         server.await.expect("server task");
         // The bridge publishes confirmations and nothing else: the node announces
         // neither a connection nor a disconnection.
@@ -4777,13 +4962,13 @@ node_ws_urls:
         .expect("state");
         let bridge = tokio::spawn(run_ws_bridge(state.clone()));
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert!(!state.events.is_ready());
         assert!(tokio::time::timeout(Duration::from_secs(6), bridge)
             .await
             .expect("bounded timeout")
             .expect("task")
             .is_err());
-        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert!(!state.events.is_ready());
         server.abort();
     }
 
@@ -4810,7 +4995,7 @@ node_ws_urls:
         })
         .expect("state");
         assert!(run_ws_bridge(state.clone()).await.is_err());
-        assert!(!state.upstream_ready.load(Ordering::Relaxed));
+        assert!(!state.events.is_ready());
         server.await.expect("server");
     }
 
