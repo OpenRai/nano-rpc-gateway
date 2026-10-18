@@ -2420,6 +2420,57 @@ async fn account_history_reports_previous_when_truncated_and_next_when_reversed(
 }
 
 #[tokio::test]
+async fn dispatcher_forwards_native_string_counts_without_converting_them() {
+    let requests = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<Value>::new()));
+    let recorded = requests.clone();
+    let router = Router::new().route(
+        "/",
+        post(move |Json(body): Json<Value>| {
+            let recorded = recorded.clone();
+            async move {
+                recorded.lock().await.push(body.clone());
+                Json(match body["action"].as_str() {
+                    Some("account_history") => json!({"account":"nano_test","history":[]}),
+                    Some("receivable") => json!({"blocks":[]}),
+                    Some("accounts_receivable") => json!({"blocks":{}}),
+                    _ => json!({"error":"unexpected action"}),
+                })
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("native listener");
+    let address = listener.local_addr().expect("address");
+    let server =
+        tokio::spawn(async move { axum::serve(listener, router).await.expect("native server") });
+    let state = AppState::new(test_config(format!("http://{address}"))).expect("state");
+    for method in ["account_history", "receivable", "accounts_receivable"] {
+        for count in [json!("10"), json!("-1"), json!(10)] {
+            let mut params = if method == "accounts_receivable" {
+                json!({"accounts":["nano_test"]})
+            } else {
+                json!({"account":"nano_test"})
+            };
+            params["count"] = count.clone();
+            let result = rpc(
+                state.clone(),
+                &json!({"jsonrpc":"2.0", "id":1,
+                "method":method, "params":params})
+                .to_string(),
+            )
+            .await;
+            assert!(result.get("result").is_some(), "{result}");
+            let requests = requests.lock().await;
+            let sent = requests.last().expect("native request");
+            assert_eq!(sent["action"], method);
+            assert_eq!(sent["count"], count);
+        }
+    }
+    server.abort();
+}
+
+#[tokio::test]
 async fn account_history_with_count_minus_one_returns_the_whole_chain() {
     let state = AppState::new(test_config(start_native_stub().await)).expect("state");
     let response = rpc(

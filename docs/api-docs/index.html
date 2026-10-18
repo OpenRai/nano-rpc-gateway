@@ -3,7 +3,7 @@
 <body><header><a class="brand" href="#top"><span class="mark">N</span><span>Nano Gateway<small>nano-node/V28.2</small></span></a><nav><a href="/openrpc.json">OpenRPC JSON</a><a href="/asyncapi.json">AsyncAPI JSON</a></nav></header>
 <main id="top"><section class="hero"><p class="kicker">Gateway JSON-RPC 2.0 API and SSE</p><h1>JSON-RPC 2.0 for Nano ledger queries</h1><p>Send JSON-RPC 2.0 requests to this gateway. It translates ledger calls into actions on Nano node's separate custom JSON RPC interface. Use SSE to receive confirmation events.</p><label class="search"><span>Search JSON-RPC methods, events, and fields</span><input id="search" type="search" placeholder="Try accounts_balances or confirmed_frontier" autocomplete="off"></label></section>
 <section class="tools" aria-labelledby="tools-title"><div><p class="eyebrow">Live tools</p><h2 id="tools-title">Explore the gateway contracts</h2><p>The OpenRPC Playground loads this gateway's OpenRPC schema and sends JSON-RPC 2.0 requests to its API. AsyncAPI Studio loads the SSE confirmation-event contract for inspection.</p></div><div class="tool-links"><a class="tool-link" data-tool="openrpc" href="/docs/openrpc/" target="_blank" rel="noreferrer">OpenRPC Playground <span aria-hidden="true">↗</span></a><a class="tool-link" data-tool="asyncapi" href="/docs/asyncapi/" target="_blank" rel="noreferrer">AsyncAPI Studio <span aria-hidden="true">↗</span></a></div></section>
-<div class="tabs" role="tablist" aria-label="Reference section"><button class="tab active" data-tab="rpc" role="tab" aria-controls="rpc" aria-selected="true">JSON-RPC API <span>14</span></button><button class="tab" data-tab="events" role="tab" aria-controls="events" aria-selected="false">SSE events <span>1</span></button></div>
+<div class="tabs" role="tablist" aria-label="Reference section"><button class="tab active" data-tab="rpc" role="tab" aria-controls="rpc" aria-selected="true">JSON-RPC API <span>15</span></button><button class="tab" data-tab="events" role="tab" aria-controls="events" aria-selected="false">SSE events <span>1</span></button></div>
 <section id="rpc" class="panel active" role="tabpanel"><div class="intro"><h2>Gateway JSON-RPC 2.0 methods</h2><p>Send these methods in JSON-RPC 2.0 requests to <code>POST /rpc</code>. For ledger methods, the gateway sends the corresponding action to the Nano node's custom JSON RPC interface. The gateway's <code>rpc.discover</code> method returns its OpenRPC document. Examples show JSON-RPC 2.0 requests and result shapes.</p></div><article id="rpc-version" data-entry="version Read the upstream node version. {
   &quot;jsonrpc&quot;: &quot;2.0&quot;,
   &quot;method&quot;: &quot;version&quot;,
@@ -490,6 +490,39 @@
   <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
 <span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
   <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;object | object&gt;&quot;</span>
+<span class="hljs-punctuation">}</span></code></pre></section></div></article>
+<article id="rpc-work_validate" data-entry="work_validate Check whether work is valid for a block. Authentication follows the Common-method policy. {
+  &quot;jsonrpc&quot;: &quot;2.0&quot;,
+  &quot;method&quot;: &quot;work_validate&quot;,
+  &quot;params&quot;: {
+    &quot;hash&quot;: &quot;&lt;hash&gt;&quot;,
+    &quot;work&quot;: &quot;&lt;work&gt;&quot;
+  },
+  &quot;id&quot;: 1
+} {
+  &quot;result&quot;: {
+    &quot;difficulty&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;multiplier&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;valid&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;valid_all&quot;: &quot;&lt;string&gt;&quot;,
+    &quot;valid_receive&quot;: &quot;&lt;string&gt;&quot;
+  }
+}"><div class="entry-info"><div class="eyebrow">JSON-RPC method</div><h2>work_validate</h2><p>Check whether work is valid for a block. Authentication follows the Common-method policy.</p></div><div class="examples"><section class="example"><div class="example-head"><h3>Request</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;jsonrpc&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;2.0&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;method&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;work_validate&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;params&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;hash&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;hash&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;work&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;work&gt;&quot;</span>
+  <span class="hljs-punctuation">}</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-attr">&quot;id&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">1</span>
+<span class="hljs-punctuation">}</span></code></pre></section><section class="example"><div class="example-head"><h3>Result shape</h3><button class="copy" type="button">Copy</button></div><pre><code class="hljs language-json"><span class="hljs-punctuation">{</span>
+  <span class="hljs-attr">&quot;result&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-attr">&quot;difficulty&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;multiplier&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;valid&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;valid_all&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-attr">&quot;valid_receive&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;&lt;string&gt;&quot;</span>
+  <span class="hljs-punctuation">}</span>
 <span class="hljs-punctuation">}</span></code></pre></section></div></article>
 <article id="rpc-rpc-discover" data-entry="rpc.discover Return the OpenRPC document. {
   &quot;jsonrpc&quot;: &quot;2.0&quot;,

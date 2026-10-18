@@ -113,6 +113,8 @@ it sends exactly three transfers of 0.00000001 XNO between the supplied local
 agent wallets. It verifies public HTTP/1.1 and HTTP/2 delivery, stream termination
 during a five-second relay outage, retryable 503s, unaffected RPC, recovery, and
 receive confirmations. Local PoW time is reported separately from SSE latency.
+If a run stopped after its first send was verified, `--resume-send-hash` reuses
+that send instead of spending the amount again; retain the original test log.
 Afterward restore the original WS configuration, recreate only the gateway, and
 remove the private relay. The default gateway image contains no relay executable.
 

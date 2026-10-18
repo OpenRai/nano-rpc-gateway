@@ -27,7 +27,9 @@ def http(base, path, body=None):
         headers={"User-Agent": "curl/8.21.0", "Content-Type": "application/json"},
     )
     try:
-        response = urllib.request.urlopen(request, timeout=10)
+        # RPC can spend ten seconds on each of three ordered upstreams. The
+        # observer's budget must exceed the gateway's complete failover budget.
+        response = urllib.request.urlopen(request, timeout=45 if path == "/rpc" else 10)
     except urllib.error.HTTPError as error:
         response = error
     with response:
@@ -122,6 +124,7 @@ def main():
     parser.add_argument("--source-wallet", required=True)
     parser.add_argument("--destination-wallet", required=True)
     parser.add_argument("--destination-address", required=True)
+    parser.add_argument("--resume-send-hash", help="Reuse a first send already verified before an interrupted test; do not send it twice")
     args = parser.parse_args()
     base = args.gateway.rstrip("/")
     destination = args.destination_address
@@ -130,6 +133,8 @@ def main():
     assert any(w["name"] == args.destination_wallet and w["address"] == destination for w in wallets)
     valid, _ = cli("validate", destination)
     assert valid["valid"]
+    if args.resume_send_hash:
+        assert re.fullmatch(r"[0-9A-F]{64}", args.resume_send_hash)
 
     def relay(action):
         result = subprocess.run([
@@ -171,8 +176,17 @@ def main():
 
     try:
         await_ready()
+        # Check the independent RPC path before introducing any WS failure.
+        status, _, response = http(base, "/rpc", {
+            "jsonrpc":"2.0", "id":0, "method":"account_info", "params":{"account":destination}
+        })
+        assert status == 200 and "result" in response, "baseline RPC read failed before fault injection"
         original = open_streams()
-        send(1, original)
+        if args.resume_send_hash:
+            sends.append(args.resume_send_hash)
+            report(resumedFirstSend=args.resume_send_hash)
+        else:
+            send(1, original)
         assert all(not stream.ended.is_set() for stream in original)
         paused = True
         relay("pause")

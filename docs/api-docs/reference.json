@@ -191,6 +191,15 @@
     },
     {
       "kind": "rpc",
+      "name": "work_validate",
+      "summary": "Check whether work is valid for a block. Authentication follows the Common-method policy.",
+      "href": "#rpc-work_validate",
+      "request": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"work_validate\",\n  \"params\": {\n    \"hash\": \"<hash>\",\n    \"work\": \"<work>\"\n  },\n  \"id\": 1\n}",
+      "result": "{\n  \"result\": {\n    \"difficulty\": \"<string>\",\n    \"multiplier\": \"<string>\",\n    \"valid\": \"<string>\",\n    \"valid_all\": \"<string>\",\n    \"valid_receive\": \"<string>\"\n  }\n}",
+      "search": "work_validate Check whether work is valid for a block. Authentication follows the Common-method policy. {\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"work_validate\",\n  \"params\": {\n    \"hash\": \"<hash>\",\n    \"work\": \"<work>\"\n  },\n  \"id\": 1\n} {\n  \"result\": {\n    \"difficulty\": \"<string>\",\n    \"multiplier\": \"<string>\",\n    \"valid\": \"<string>\",\n    \"valid_all\": \"<string>\",\n    \"valid_receive\": \"<string>\"\n  }\n}"
+    },
+    {
+      "kind": "rpc",
       "name": "rpc.discover",
       "summary": "Return the OpenRPC document.",
       "href": "#rpc-rpc-discover",

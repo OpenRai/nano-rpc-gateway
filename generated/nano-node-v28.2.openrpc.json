@@ -68,8 +68,17 @@
             "type": "array"
           },
           "count": {
-            "description": "Maximum number of entries. -1 returns the whole chain.",
-            "type": "integer"
+            "description": "Maximum number of entries. -1 returns the whole chain. Native decimal strings are forwarded unchanged.",
+            "oneOf": [
+              {
+                "minimum": -1,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(-1|[0-9]+)$",
+                "type": "string"
+              }
+            ]
           },
           "head": {
             "description": "Start from this block instead of the account's latest, and include it as the first entry. Use it to paginate.",
@@ -326,8 +335,17 @@
             "type": "array"
           },
           "count": {
-            "description": "Maximum number of blocks to return per account.",
-            "type": "integer"
+            "description": "Maximum number of blocks to return per account. Native decimal strings are forwarded unchanged.",
+            "oneOf": [
+              {
+                "minimum": -1,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(-1|[0-9]+)$",
+                "type": "string"
+              }
+            ]
           },
           "include_active": {
             "default": false,
@@ -729,8 +747,17 @@
             "type": "string"
           },
           "count": {
-            "description": "Maximum number of blocks to return.",
-            "type": "integer"
+            "description": "Maximum number of blocks to return. Native decimal strings are forwarded unchanged.",
+            "oneOf": [
+              {
+                "minimum": -1,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(-1|[0-9]+)$",
+                "type": "string"
+              }
+            ]
           },
           "include_active": {
             "default": false,
@@ -822,6 +849,177 @@
         },
         "required": [
           "rpc_version"
+        ],
+        "type": "object"
+      },
+      "WorkCancelParams": {
+        "properties": {
+          "hash": {
+            "description": "Block hash whose work generation should stop.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash"
+        ],
+        "type": "object"
+      },
+      "WorkCancelResult": {
+        "properties": {
+          "success": {
+            "const": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "type": "object"
+      },
+      "WorkGenerateParams": {
+        "properties": {
+          "account": {
+            "description": "Nano account forwarded to work peers when use_peers is true.",
+            "type": "string"
+          },
+          "block": {
+            "description": "Optional block for selecting difficulty; a JSON string or object.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object"
+              }
+            ]
+          },
+          "difficulty": {
+            "description": "Optional 16-digit hexadecimal work difficulty.",
+            "type": "string"
+          },
+          "hash": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "json_block": {
+            "default": false,
+            "description": "Interpret block as a JSON object.",
+            "type": "boolean"
+          },
+          "multiplier": {
+            "description": "Optional positive multiplier; overrides difficulty.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "use_peers": {
+            "default": false,
+            "description": "Query configured work peers when generating work.",
+            "type": "boolean"
+          },
+          "version": {
+            "enum": [
+              "work_1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash"
+        ],
+        "type": "object"
+      },
+      "WorkGenerateResult": {
+        "properties": {
+          "difficulty": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "multiplier": {
+            "type": "string"
+          },
+          "work": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "work",
+          "difficulty",
+          "multiplier",
+          "hash"
+        ],
+        "type": "object"
+      },
+      "WorkValidateParams": {
+        "properties": {
+          "difficulty": {
+            "description": "Optional 16-digit hexadecimal difficulty.",
+            "type": "string"
+          },
+          "hash": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "multiplier": {
+            "description": "Optional positive multiplier; overrides difficulty.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "version": {
+            "enum": [
+              "work_1"
+            ],
+            "type": "string"
+          },
+          "work": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "work"
+        ],
+        "type": "object"
+      },
+      "WorkValidateResult": {
+        "properties": {
+          "difficulty": {
+            "type": "string"
+          },
+          "multiplier": {
+            "type": "string"
+          },
+          "valid": {
+            "description": "Present when difficulty or multiplier was supplied.",
+            "enum": [
+              "0",
+              "1"
+            ],
+            "type": "string"
+          },
+          "valid_all": {
+            "enum": [
+              "0",
+              "1"
+            ],
+            "type": "string"
+          },
+          "valid_receive": {
+            "enum": [
+              "0",
+              "1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "valid_all",
+          "valid_receive",
+          "difficulty",
+          "multiplier"
         ],
         "type": "object"
       }
@@ -998,8 +1196,17 @@
           "name": "count",
           "required": false,
           "schema": {
-            "description": "Maximum number of blocks to return.",
-            "type": "integer"
+            "description": "Maximum number of blocks to return. Native decimal strings are forwarded unchanged.",
+            "oneOf": [
+              {
+                "minimum": -1,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(-1|[0-9]+)$",
+                "type": "string"
+              }
+            ]
           }
         },
         {
@@ -1209,8 +1416,17 @@
           "name": "count",
           "required": false,
           "schema": {
-            "description": "Maximum number of entries. -1 returns the whole chain.",
-            "type": "integer"
+            "description": "Maximum number of entries. -1 returns the whole chain. Native decimal strings are forwarded unchanged.",
+            "oneOf": [
+              {
+                "minimum": -1,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(-1|[0-9]+)$",
+                "type": "string"
+              }
+            ]
           }
         },
         {
@@ -1493,8 +1709,17 @@
           "name": "count",
           "required": false,
           "schema": {
-            "description": "Maximum number of blocks to return per account.",
-            "type": "integer"
+            "description": "Maximum number of blocks to return per account. Native decimal strings are forwarded unchanged.",
+            "oneOf": [
+              {
+                "minimum": -1,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(-1|[0-9]+)$",
+                "type": "string"
+              }
+            ]
           }
         },
         {
@@ -1674,13 +1899,96 @@
         "browser_safe": true,
         "name": "process",
         "requires": [
-          "authenticated"
+          "authenticated",
+          "common"
         ]
       },
       "x-nano-params-schema": {
         "$ref": "#/components/schemas/ProcessParams"
       },
       "x-nano-schema-provenance": "profiles/nano-node-v28.2.yaml"
+    },
+    {
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidRequest"
+        },
+        {
+          "$ref": "#/components/errors/MethodNotFound"
+        },
+        {
+          "$ref": "#/components/errors/NodeError"
+        },
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ],
+      "name": "work_validate",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "difficulty",
+          "required": false,
+          "schema": {
+            "description": "Optional 16-digit hexadecimal difficulty.",
+            "type": "string"
+          }
+        },
+        {
+          "name": "hash",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "multiplier",
+          "required": false,
+          "schema": {
+            "description": "Optional positive multiplier; overrides difficulty.",
+            "exclusiveMinimum": 0,
+            "type": "number"
+          }
+        },
+        {
+          "name": "version",
+          "required": false,
+          "schema": {
+            "enum": [
+              "work_1"
+            ],
+            "type": "string"
+          }
+        },
+        {
+          "name": "work",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/WorkValidateResult"
+        }
+      },
+      "summary": "Check whether work is valid for a block. Authentication follows the Common-method policy.",
+      "x-nano-capability": {
+        "browser_safe": false,
+        "name": "work_validate",
+        "requires": [
+          "authenticated",
+          "common"
+        ]
+      },
+      "x-nano-params-schema": {
+        "$ref": "#/components/schemas/WorkValidateParams"
+      },
+      "x-nano-schema-provenance": "https://docs.nano.org/commands/rpc-protocol/#work_validate"
     },
     {
       "name": "rpc.discover",
@@ -1708,7 +2016,7 @@
       }
     }
   ],
-  "x-nano-artifact-sha256": "sha256:e971760623b7babad97f553c5368efce90d874aa6033cadd1b83c6abe134f57e",
+  "x-nano-artifact-sha256": "sha256:bb019ca9f42d2ad2abbad35b888bda51d42e0ae8da024083f0834bd0418c790a",
   "x-nano-common-authentication": {
     "required": true
   },

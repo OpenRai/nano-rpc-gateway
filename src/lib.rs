@@ -980,7 +980,7 @@ fn component_schemas() -> serde_json::Map<String, Value> {
         "ReceivableParams",
         json!({"type":"object","required":["account"],"properties":{
             "account":{"type":"string","minLength":1},
-            "count":{"type":"integer","description":"Maximum number of blocks to return."},
+            "count":{"oneOf":[{"type":"integer","minimum":-1},{"type":"string","pattern":"^(-1|[0-9]+)$"}],"description":"Maximum number of blocks to return. Native decimal strings are forwarded unchanged."},
             "threshold":{"type":"string","description":"Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape."},
             "source":{"type":"boolean","default":false,"description":"Include the sending account with each block. Selects the hash-to-object result shape."},
             "include_active":{"type":"boolean","default":false,"description":"Include blocks without a finished confirmation."},
@@ -1002,7 +1002,7 @@ fn component_schemas() -> serde_json::Map<String, Value> {
         "AccountsReceivableParams",
         json!({"type":"object","required":["accounts"],"properties":{
             "accounts":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
-            "count":{"type":"integer","description":"Maximum number of blocks to return per account."},
+            "count":{"oneOf":[{"type":"integer","minimum":-1},{"type":"string","pattern":"^(-1|[0-9]+)$"}],"description":"Maximum number of blocks to return per account. Native decimal strings are forwarded unchanged."},
             "threshold":{"type":"string","description":"Only return blocks whose amount is at least this value, in raw. Selects the hash-to-amount result shape."},
             "source":{"type":"boolean","default":false,"description":"Include the sending account with each block. Selects the hash-to-object result shape."},
             "include_active":{"type":"boolean","default":false,"description":"Include blocks without a finished confirmation."},
@@ -1014,7 +1014,7 @@ fn component_schemas() -> serde_json::Map<String, Value> {
         json!({"type":"object","required":["account"],"properties":{
             "account":{"type":"string","minLength":1},
             "head":{"type":"string","minLength":64,"maxLength":64,"description":"Start from this block instead of the account's latest, and include it as the first entry. Use it to paginate."},
-            "count":{"type":"integer","description":"Maximum number of entries. -1 returns the whole chain."},
+            "count":{"oneOf":[{"type":"integer","minimum":-1},{"type":"string","pattern":"^(-1|[0-9]+)$"}],"description":"Maximum number of entries. -1 returns the whole chain. Native decimal strings are forwarded unchanged."},
             "offset":{"type":"integer","description":"Skip this many blocks, starting from head when given."},
             "reverse":{"type":"boolean","default":false,"description":"Walk forward from head toward the frontier instead of backward. The response reports `next` in place of `previous`."},
             "raw":{"type":"boolean","default":false,"description":"Return full block content instead of a send/receive summary. Required to see change and epoch blocks, which the summary skips."},
@@ -2396,14 +2396,25 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
         return Err(format!("invalid parameter: {required}"));
     }
 
-    // `count` is documented as an integer. -1 means the whole chain, so the floor is
-    // -1 rather than 1; anything below that cannot select a documented behaviour.
+    // The node documents decimal strings for these counts, as well as -1 for
+    // account_history's whole-chain sentinel. Preserve either wire representation.
+    // https://docs.nano.org/commands/rpc-protocol/#account_history
+    // https://docs.nano.org/commands/rpc-protocol/#receivable
+    // https://docs.nano.org/commands/rpc-protocol/#accounts_receivable
     if matches!(
         method,
         "account_history" | "receivable" | "accounts_receivable"
     ) {
         if let Some(count) = object.get("count") {
-            if !count.as_i64().is_some_and(|value| value >= -1) {
+            let valid = count.as_i64().is_some_and(|value| value >= -1)
+                || count.as_u64().is_some()
+                || count.as_str().is_some_and(|value| {
+                    value == "-1"
+                        || (!value.is_empty()
+                            && value.bytes().all(|byte| byte.is_ascii_digit())
+                            && value.parse::<u64>().is_ok())
+                });
+            if !valid {
                 return Err("invalid parameter: count".into());
             }
         }
@@ -4311,6 +4322,46 @@ node_ws_urls:
         assert!(validate_result("blocks_info", &upstream));
         assert_eq!(upstream["blocks"]["A"]["successor"], "B");
         assert_eq!(upstream["blocks_not_found"][0], "C");
+    }
+
+    #[test]
+    fn collection_counts_accept_native_strings_and_unsigned_limits() {
+        for method in ["account_history", "receivable", "accounts_receivable"] {
+            let mut params = if method == "accounts_receivable" {
+                json!({"accounts":["nano_test"]})
+            } else {
+                json!({"account":"nano_test"})
+            };
+            for count in [
+                json!("-1"),
+                json!("0"),
+                json!("10"),
+                json!("18446744073709551615"),
+                json!(u64::MAX),
+            ] {
+                params["count"] = count;
+                assert!(
+                    validate_params(method, &params).is_ok(),
+                    "{method}: {params}"
+                );
+            }
+            for count in [
+                json!("-2"),
+                json!("all"),
+                json!(""),
+                json!("+1"),
+                json!("1.0"),
+                json!("18446744073709551616"),
+                json!(true),
+                json!(1.5),
+            ] {
+                params["count"] = count;
+                assert!(
+                    validate_params(method, &params).is_err(),
+                    "{method}: {params}"
+                );
+            }
+        }
     }
 
     #[test]

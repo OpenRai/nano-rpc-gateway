@@ -15,7 +15,7 @@ class AccountBalanceResult(BaseModel):
 
 class AccountHistoryParams(BaseModel):
     account: str
-    count: int
+    count: int | str
 
 
 class AccountHistoryResult(BaseModel):
