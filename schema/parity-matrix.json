@@ -415,6 +415,57 @@
       },
       "note": "subtype is strongly recommended upstream and required in a future node version. With async the result is started rather than hash, which the schema models."
     },
+    "work_validate": {
+      "status": "present",
+      "anchor": "rpc-protocol#work_validate",
+      "params": {
+        "difficulty": {
+          "required": false,
+          "status": "present",
+          "note": "Uses this difficulty instead of the network base difficulty; multiplier overrides it."
+        },
+        "hash": {
+          "required": true,
+          "status": "present"
+        },
+        "multiplier": {
+          "required": false,
+          "status": "present",
+          "note": "Positive multiplier from base difficulty; overrides difficulty."
+        },
+        "version": {
+          "required": false,
+          "status": "present",
+          "note": "Since V21.0; work_1 is the default and only valid version."
+        },
+        "work": {
+          "required": true,
+          "status": "present"
+        }
+      },
+      "result": "WorkValidateResult",
+      "result_fields": {
+        "valid": {
+          "status": "present",
+          "note": "Included when difficulty or multiplier was supplied."
+        },
+        "valid_all": {
+          "status": "present",
+          "note": "Validity at the current network difficulty."
+        },
+        "valid_receive": {
+          "status": "present",
+          "note": "Validity for receive blocks."
+        },
+        "difficulty": {
+          "status": "present"
+        },
+        "multiplier": {
+          "status": "present"
+        }
+      },
+      "note": "Exposes the V21+ response fields and optional difficulty controls documented for work_validate. The node's string values and conditional valid field pass through unchanged."
+    },
     "rpc.discover": {
       "status": "translation-layer",
       "item": 5,
