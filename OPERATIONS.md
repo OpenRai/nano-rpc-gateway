@@ -28,11 +28,11 @@ hash, request ID, token, or raw error text is used as a metric label.
    The gateway strips URL userinfo before issuing the request and sends the
    username as Basic authentication with an empty password. Keep key-bearing values in
    a deployment secret or untracked local config, never in a committed example.
-   Nano.to's documented `work_generate` response uses `frontier` and adds service
-   metadata, while the Nano node V28 response uses `hash`. The gateway validates the
-   pinned Nano profile and therefore rejects that response instead of forwarding
-   incompatible data. Use a work upstream that returns the documented node shape, or
-   resolve the discrepancy with the provider before routing work through this gateway.
+   The authenticated Nano.to `work_generate` endpoint has been observed returning
+   `frontier` instead of the `hash` field shown in its current docs and required by
+   Nano RPC V28. The gateway renames `frontier` to `hash` only when it exactly matches
+   the requested work root, and logs that compatibility remap. A mismatched value is
+   still rejected. Continue to ask Nano.to to make the live response match its docs.
 3. Leave `allow_work` and `allow_control` disabled unless the corresponding
    policy and PASETO verification key have been reviewed. These flags enable
    Work-scope `work_generate` and Control-scope `work_cancel`; `work_validate`
