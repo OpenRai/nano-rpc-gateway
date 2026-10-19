@@ -1601,11 +1601,10 @@ fn upstream_label(url: &Url) -> String {
 /// Upstream defaults therefore apply as the node documents them, which is what
 /// keeps the response shape predictable for callers.
 fn native_request_body(action: &str, params: &Value) -> serde_json::Map<String, Value> {
-    let mut body = serde_json::Map::new();
+    let mut body = params.as_object().cloned().unwrap_or_default();
+    // The action is selected by the authorized JSON-RPC method. Keep it
+    // authoritative even if an internal caller passes an unexpected field.
     body.insert("action".into(), Value::String(action.to_owned()));
-    if let Value::Object(values) = params {
-        body.extend(values.clone());
-    }
     body
 }
 
@@ -2368,6 +2367,9 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
     let object = params
         .as_object()
         .ok_or_else(|| "params must be an object".to_string())?;
+    if object.contains_key("action") {
+        return Err("params.action is reserved; select the action with method".into());
+    }
     let required = match method {
         "account_info" | "receivable" | "account_balance" | "account_history" => "account",
         "accounts_balances" | "accounts_frontiers" | "accounts_receivable" => "accounts",
@@ -4193,6 +4195,13 @@ node_ws_urls:
         let request = native_request_body("receivable", &json!({"account": "nano_opened"}));
         assert_eq!(request["action"], "receivable");
         assert!(!request.contains_key("source"));
+    }
+
+    #[test]
+    fn native_request_body_keeps_the_authorized_action() {
+        let request = native_request_body("version", &json!({"action":"work_generate"}));
+
+        assert_eq!(request["action"], "version");
     }
 
     #[test]

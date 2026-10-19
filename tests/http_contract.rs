@@ -1,4 +1,5 @@
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use axum::{
@@ -255,6 +256,43 @@ async fn account_info_translates_native_response() {
     .await;
     assert_eq!(response["result"]["frontier"], "A");
     assert_eq!(response["id"], 1);
+}
+
+#[tokio::test]
+async fn params_action_cannot_select_a_privileged_upstream_action() {
+    let received = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let captured = Arc::clone(&received);
+    let router = Router::new().route(
+        "/",
+        post(move |Json(body): Json<Value>| {
+            captured.lock().expect("captured requests lock").push(body);
+            async { Json(json!({"rpc_version":"1"})) }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind stub");
+    let address = listener.local_addr().expect("stub address");
+    tokio::spawn(async move { axum::serve(listener, router).await.expect("stub server") });
+
+    // test_config leaves work and control disabled and configures no auth key.
+    // `version` is a base method, so this exercises the unauthenticated path.
+    let state = AppState::new(test_config(format!("http://{address}"))).expect("state");
+    for (action, params) in [
+        ("work_generate", json!({"hash":"A"})),
+        ("work_cancel", json!({"hash":"A"})),
+        ("stop", json!({})),
+        ("block_confirm", json!({"hash":"A"})),
+    ] {
+        let mut params = params;
+        params["action"] = json!(action);
+        let request = json!({"jsonrpc":"2.0", "method":"version", "params":params, "id":1});
+        let response = rpc(state.clone(), &request.to_string()).await;
+        assert_eq!(response["error"]["code"], -32602, "{action}: {response}");
+    }
+
+    assert!(
+        received.lock().expect("captured requests lock").is_empty(),
+        "rejected selector parameters must not reach the upstream"
+    );
 }
 
 #[tokio::test]
