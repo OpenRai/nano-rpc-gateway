@@ -27,9 +27,13 @@ use tokio_tungstenite::{
 use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
+#[command(name = "ws-fault-relay", version = nano_rpc_gateway::build_info::version())]
 struct Args {
+    /// Print the shared build identity as JSON and exit.
+    #[arg(long)]
+    build_info: bool,
     /// Real upstreams, in the same order as /0, /1, ... relay paths.
-    #[arg(long, required = true)]
+    #[arg(long, required_unless_present = "build_info")]
     upstream: Vec<String>,
 }
 
@@ -79,7 +83,7 @@ async fn relay(stream: TcpStream, state: Arc<Relay>) -> anyhow::Result<()> {
     let mut request = state.upstreams[index].as_str().into_client_request()?;
     request.headers_mut().insert(
         "user-agent",
-        "Mozilla/5.0 (compatible; nano-rpc-gateway/0.1)".parse()?,
+        nano_rpc_gateway::build_info::USER_AGENT.parse()?,
     );
     let (mut upstream, _) = tokio::select! {
         biased;
@@ -109,6 +113,13 @@ async fn relay(stream: TcpStream, state: Arc<Relay>) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let args = Args::parse();
+    if args.build_info {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&nano_rpc_gateway::build_info::json())?
+        );
+        return Ok(());
+    }
     let (circuit, _) = watch::channel(CancellationToken::new());
     let state = Arc::new(Relay {
         upstreams: args.upstream,

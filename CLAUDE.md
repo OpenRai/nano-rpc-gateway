@@ -2,6 +2,16 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
+## Nano RPC implementation
+
+For multi-account snapshots, prefer the upstream batch actions and preserve their
+per-account maps and errors. Use `account_info` for transaction construction; when
+confirmed data is required, honor the method's documented confirmation option and
+default. See [accounts_balances](https://docs.nano.org/commands/rpc-protocol/#accounts_balances),
+[accounts_frontiers](https://docs.nano.org/commands/rpc-protocol/#accounts_frontiers),
+[accounts_receivable](https://docs.nano.org/commands/rpc-protocol/#accounts_receivable),
+and [account_info](https://docs.nano.org/commands/rpc-protocol/#account_info).
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
 ## Beads Issue Tracker
 

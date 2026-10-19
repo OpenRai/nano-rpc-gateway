@@ -1460,6 +1460,7 @@ async fn wildcard_cors_still_preflights_the_declared_methods_and_headers() {
         .await
         .expect("preflight response");
     assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    assert_eq!(response.headers()["access-control-max-age"], "3600");
     let allowed_headers = response.headers()["access-control-allow-headers"]
         .to_str()
         .expect("allowed headers")
@@ -1494,6 +1495,7 @@ async fn confirmation_stream_ignores_a_last_event_id_cursor() {
         .await
         .expect("gateway response");
     let mut body = response.into_body();
+    let _ = body.frame().await.expect("opening comment").expect("data");
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(50), body.frame())
             .await
@@ -1529,11 +1531,10 @@ async fn confirmation_stream_carries_the_event_time_and_no_added_fields() {
         .uri("/events/confirmations")
         .body(axum::body::Body::empty())
         .expect("request");
-    let response = app(state.clone())
+    let mut response = app(state.clone())
         .oneshot(request)
         .await
         .expect("gateway response");
-    let mut body = response.into_body();
     state
         .events
         .publish(
@@ -1548,14 +1549,7 @@ async fn confirmation_stream_carries_the_event_time_and_no_added_fields() {
             }),
         )
         .await;
-    let frame = tokio::time::timeout(std::time::Duration::from_secs(1), body.frame())
-        .await
-        .expect("frame timeout")
-        .expect("frame")
-        .expect("data")
-        .into_data()
-        .expect("bytes");
-    let text = String::from_utf8(frame.to_vec()).expect("text");
+    let text = next_event(&mut response).await;
     assert!(text.contains("event: nano.confirmation"));
     assert!(text.contains("\"time\":\"1756416048136\""));
     assert!(text.contains("\"confirmation_type\":\"active_quorum\""));
@@ -2512,14 +2506,44 @@ async fn get_stream(
 }
 
 async fn next_event(body: &mut axum::response::Response) -> String {
-    let frame = tokio::time::timeout(std::time::Duration::from_secs(2), body.frame())
-        .await
-        .expect("frame timeout")
-        .expect("frame")
-        .expect("data")
-        .into_data()
-        .expect("bytes");
-    String::from_utf8_lossy(&frame).to_string()
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let frame = body
+                .frame()
+                .await
+                .expect("frame")
+                .expect("data")
+                .into_data()
+                .expect("bytes");
+            let text = String::from_utf8_lossy(&frame).to_string();
+            if text.contains("event:") {
+                return text;
+            }
+        }
+    })
+    .await
+    .expect("event timeout")
+}
+
+#[tokio::test]
+async fn idle_confirmation_stream_opens_immediately_for_both_verbs() {
+    let state = AppState::new(test_config(start_native_stub().await)).expect("state");
+    let _session = state.events.start_session();
+    let responses = [
+        get_stream(state.clone(), "").await,
+        post_stream(state, json!({})).await,
+    ];
+    for (status, mut response) in responses {
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let frame = tokio::time::timeout(std::time::Duration::from_millis(500), response.frame())
+            .await
+            .expect("opens before idle heartbeat")
+            .expect("frame")
+            .expect("data")
+            .into_data()
+            .expect("bytes");
+        assert_eq!(frame.as_ref(), b": connected\n\n");
+    }
 }
 
 #[tokio::test]

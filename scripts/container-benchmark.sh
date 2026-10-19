@@ -18,7 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 start_ns="$(date +%s%N)"
-docker compose -f "$compose_file" up -d --build
+"$(dirname "${BASH_SOURCE[0]}")/with-build-metadata.sh" docker compose -f "$compose_file" up -d --build
 compose_ns="$(date +%s%N)"
 
 healthy=0

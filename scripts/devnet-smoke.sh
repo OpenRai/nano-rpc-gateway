@@ -8,7 +8,7 @@ start_devnet="${START_DEVNET:-0}"
 compose_file="${COMPOSE_FILE:-docker-compose.dev.yml}"
 
 if [[ "$start_devnet" == "1" ]]; then
-  docker compose -f "$compose_file" up -d --build
+  "$(dirname "${BASH_SOURCE[0]}")/with-build-metadata.sh" docker compose -f "$compose_file" up -d --build
   cleanup() { docker compose -f "$compose_file" down; }
   trap cleanup EXIT
 fi

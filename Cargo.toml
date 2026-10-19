@@ -1,7 +1,8 @@
 [package]
 name = "nano-rpc-gateway"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.89"
 description = "A small JSON-RPC/OpenRPC/SSE gateway for Nano nodes"
 license = "MIT"
 

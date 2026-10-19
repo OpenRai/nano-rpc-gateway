@@ -1,5 +1,7 @@
 //! Nano Gateway: a typed boundary that exposes JSON-RPC 2.0 and translates ledger calls to Nano node custom JSON RPC.
 
+pub mod build_info;
+
 use std::{
     collections::{HashMap, VecDeque},
     convert::Infallible,
@@ -403,10 +405,10 @@ impl TransportRejection {
 
     pub fn into_response(self) -> Response {
         let mut response = (self.status, Json(json!({"error": self.message}))).into_response();
-        if let Some(retry_after) = self.retry_after {
-            if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
-                response.headers_mut().insert(header::RETRY_AFTER, value);
-            }
+        if let Some(retry_after) = self.retry_after
+            && let Ok(value) = HeaderValue::from_str(&retry_after.to_string())
+        {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
         }
         response
     }
@@ -662,14 +664,12 @@ pub fn openrpc_document_with_auth(
         gateway_url,
     );
     document["x-nano-common-authentication"] = json!({"required": require_common_auth});
-    if !require_common_auth {
-        if let Some(methods) = document["methods"].as_array_mut() {
-            for method in methods
-                .iter_mut()
-                .filter(|method| method["name"] == "process" || method["name"] == "work_validate")
-            {
-                method["x-nano-capability"]["requires"] = json!([]);
-            }
+    if !require_common_auth && let Some(methods) = document["methods"].as_array_mut() {
+        for method in methods
+            .iter_mut()
+            .filter(|method| method["name"] == "process" || method["name"] == "work_validate")
+        {
+            method["x-nano-capability"]["requires"] = json!([]);
         }
     }
     let digest = openrpc_artifact_digest(profile, include_work, include_control, include_discovery);
@@ -744,7 +744,7 @@ pub fn asyncapi_document(profile: &str, gateway_url: &str) -> Value {
         "asyncapi": "3.1.0",
         "info": {
             "title": "Nano Gateway SSE Confirmation Events",
-            "version": "0.1.0",
+            "version": build_info::RELEASE_VERSION,
             "description": "Receive-only SSE notifications for a pinned Nano node profile. Subscribe before submitting a block, deduplicate notifications by hash, and reconcile through block_info if confirmation is not observed. Notifications identify account activity; call accounts_balances on the Nano node's custom JSON RPC interface for an event-triggered batch snapshot of balance and receivable state."
         },
         "defaultContentType": "application/json",
@@ -1277,7 +1277,7 @@ fn build_openrpc_document(
         }),
     );
     json!({
-        "openrpc": "1.3.2", "info": {"title":"Nano Gateway JSON-RPC 2.0 API", "version":"0.1.0", "description":"This OpenRPC document describes the gateway's JSON-RPC 2.0 API. The gateway translates ledger methods into actions on the pinned Nano node profile's separate custom JSON RPC interface."},
+        "openrpc": "1.3.2", "info": {"title":"Nano Gateway JSON-RPC 2.0 API", "version":build_info::RELEASE_VERSION, "description":"This OpenRPC document describes the gateway's JSON-RPC 2.0 API. The gateway translates ledger methods into actions on the pinned Nano node profile's separate custom JSON RPC interface."},
         "servers": [{"name":"gateway", "url":gateway_url, "variables":{"gatewayUrl":{"default":gateway_url}}}],
         "methods": methods,
         "components": Value::Object(components), "x-nano-profile": profile
@@ -1610,7 +1610,7 @@ fn native_request_body(action: &str, params: &Value) -> serde_json::Map<String, 
 }
 
 const UPSTREAM_COOLDOWN: Duration = Duration::from_secs(15);
-const WEBSOCKET_USER_AGENT: &str = "Mozilla/5.0 (compatible; nano-rpc-gateway/0.1)";
+const WEBSOCKET_USER_AGENT: &str = build_info::USER_AGENT;
 /// An acknowledged WebSocket that never forwards confirmations is unusable.
 /// The upstream subscription is unfiltered, so a healthy public network must
 /// produce a confirmation within this bound.
@@ -2249,10 +2249,10 @@ impl AppState {
                 // Only a hash the node accepted starts a cooldown. Recording a
                 // rejected hash would let a caller lock out a block that never
                 // reached the node in the first place.
-                if spec.name == "block_confirm" {
-                    if let Some(hash) = params.get("hash").and_then(Value::as_str) {
-                        self.confirm_guards.record_accepted(hash).await;
-                    }
+                if spec.name == "block_confirm"
+                    && let Some(hash) = params.get("hash").and_then(Value::as_str)
+                {
+                    self.confirm_guards.record_accepted(hash).await;
                 }
                 if normalize_work_generate_result(spec.name, &params, &mut result) {
                     tracing::warn!(
@@ -2404,19 +2404,18 @@ fn validate_params(method: &str, params: &Value) -> Result<(), String> {
     if matches!(
         method,
         "account_history" | "receivable" | "accounts_receivable"
-    ) {
-        if let Some(count) = object.get("count") {
-            let valid = count.as_i64().is_some_and(|value| value >= -1)
-                || count.as_u64().is_some()
-                || count.as_str().is_some_and(|value| {
-                    value == "-1"
-                        || (!value.is_empty()
-                            && value.bytes().all(|byte| byte.is_ascii_digit())
-                            && value.parse::<u64>().is_ok())
-                });
-            if !valid {
-                return Err("invalid parameter: count".into());
-            }
+    ) && let Some(count) = object.get("count")
+    {
+        let valid = count.as_i64().is_some_and(|value| value >= -1)
+            || count.as_u64().is_some()
+            || count.as_str().is_some_and(|value| {
+                value == "-1"
+                    || (!value.is_empty()
+                        && value.bytes().all(|byte| byte.is_ascii_digit())
+                        && value.parse::<u64>().is_ok())
+            });
+        if !valid {
+            return Err("invalid parameter: count".into());
         }
     }
 
@@ -2718,7 +2717,8 @@ pub fn app(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(allow_origin)
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .max_age(Duration::from_secs(3600));
     let mut router = Router::new()
         .route("/", get(browser_root))
         .route("/rpc", post(rpc_handler))
@@ -2791,7 +2791,9 @@ fn accepts_html(accept: Option<&axum::http::HeaderValue>) -> bool {
 async fn landing_page(State(state): State<AppState>) -> axum::response::Html<String> {
     let profile = escape_html_text(&state.config.profile);
     axum::response::Html(
-        include_str!("../docs/browser-landing.html").replace("{{profile}}", &profile),
+        include_str!("../docs/browser-landing.html")
+            .replace("{{profile}}", &profile)
+            .replace("{{version}}", &escape_html_text(build_info::version())),
     )
 }
 
@@ -3109,10 +3111,10 @@ impl StreamOptions {
                     .map(ToOwned::to_owned)
                     .collect::<Vec<_>>()
             });
-        if let Some(accounts) = &accounts {
-            if accounts.len() > MAX_BODY_ACCOUNT_ITEMS {
-                return Err("too many accounts in filter");
-            }
+        if let Some(accounts) = &accounts
+            && accounts.len() > MAX_BODY_ACCOUNT_ITEMS
+        {
+            return Err("too many accounts in filter");
         }
         let confirmation_type =
             ConfirmationType::parse(object.get("confirmation_type").and_then(Value::as_str))?;
@@ -3196,11 +3198,11 @@ impl StreamOptions {
             if !self.include_election_info {
                 fields.remove("election_info");
             }
-            if !self.include_sideband_info {
-                if let Some(block) = fields.get_mut("block").and_then(Value::as_object_mut) {
-                    block.remove("height");
-                    block.remove("local_timestamp");
-                }
+            if !self.include_sideband_info
+                && let Some(block) = fields.get_mut("block").and_then(Value::as_object_mut)
+            {
+                block.remove("height");
+                block.remove("local_timestamp");
             }
         }
         NanoEvent {
@@ -3351,8 +3353,18 @@ async fn sse_handler(
         generation,
         close_reason: "client_disconnected",
     };
+    // `tokio::select!` owns the cancellation and receive futures. Their drop only
+    // unregisters their notification waits; `ActiveStreamGuard` independently
+    // updates the stream metric and logs its close reason. Keep this localized
+    // allowance for the macro-generated temporary drop-order warning.
+    #[allow(tail_expr_drop_order)]
     let output = stream! {
         let mut guard = guard;
+        // Flush headers through proxies before the first confirmation or idle
+        // keepalive, so clients can observe the established subscription at once.
+        if !cancelled.is_cancelled() {
+            yield Ok::<Event, Infallible>(Event::default().comment("connected"));
+        }
         loop {
             let received = tokio::select! {
                 biased;
@@ -3568,13 +3580,13 @@ async fn run_ws_bridge_with_confirmation_liveness(
                 }
                 _ => continue,
             };
-            if let Ok(value) = value {
-                if let Some(event) = normalize_confirmation(&value) {
-                    confirmation_deadline
-                        .as_mut()
-                        .reset(tokio::time::Instant::now() + confirmation_liveness);
-                    session.publish("nano.confirmation", event);
-                }
+            if let Ok(value) = value
+                && let Some(event) = normalize_confirmation(&value)
+            {
+                confirmation_deadline
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + confirmation_liveness);
+                session.publish("nano.confirmation", event);
             }
         }
         Ok(())
@@ -3586,16 +3598,17 @@ async fn run_ws_bridge_with_confirmation_liveness(
     if let (Err(error), Some(url)) = (&result, &selected_ws_url) {
         log_upstream_error("websocket", url, &error.to_string());
     }
-    if connected && result.is_ok() {
-        if let Some(ws_url) = selected_ws_url.as_deref() {
-            tracing::warn!(
-                target: "nano_rpc_gateway::upstream",
-                event = "upstream_closed",
-                protocol = "websocket",
-                upstream_url = %redact_upstream_url(ws_url),
-                "websocket upstream closed"
-            );
-        }
+    if connected
+        && result.is_ok()
+        && let Some(ws_url) = selected_ws_url.as_deref()
+    {
+        tracing::warn!(
+            target: "nano_rpc_gateway::upstream",
+            event = "upstream_closed",
+            protocol = "websocket",
+            upstream_url = %redact_upstream_url(ws_url),
+            "websocket upstream closed"
+        );
     }
     result
 }
@@ -3617,10 +3630,10 @@ fn normalize_confirmation(value: &Value) -> Option<Value> {
         .get("message")
         .cloned()
         .unwrap_or_else(|| value.clone());
-    if let Value::Object(fields) = &mut data {
-        if let Some(time) = value.get("time").cloned() {
-            fields.insert("time".into(), time);
-        }
+    if let Value::Object(fields) = &mut data
+        && let Some(time) = value.get("time").cloned()
+    {
+        fields.insert("time".into(), time);
     }
     Some(data)
 }

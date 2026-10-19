@@ -42,6 +42,14 @@ parameter that the Gateway ignores is a Gateway bug, not a client bug.
 
 Cite the upstream doc section when adding or changing a method.
 
+For multi-account snapshots, prefer the upstream batch actions and preserve their
+per-account maps and errors. Use `account_info` for transaction construction; when
+confirmed data is required, honor the method's documented confirmation option and
+default. See [accounts_balances](https://docs.nano.org/commands/rpc-protocol/#accounts_balances),
+[accounts_frontiers](https://docs.nano.org/commands/rpc-protocol/#accounts_frontiers),
+[accounts_receivable](https://docs.nano.org/commands/rpc-protocol/#accounts_receivable),
+and [account_info](https://docs.nano.org/commands/rpc-protocol/#account_info).
+
 ## Non-Interactive Shell Commands
 
 **ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.

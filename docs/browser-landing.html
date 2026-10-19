@@ -35,6 +35,7 @@ main {
   max-width: 800px;
   margin: 0 auto;
   padding: clamp(2rem, 6vh, 3.5rem) clamp(1rem, 5vw, 2.5rem);
+  padding-bottom: clamp(1rem, 3vh, 1.5rem);
   background: rgba(11, 15, 25, 0.28);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -110,6 +111,13 @@ main {
   margin: 0 0 1.75rem;
 }
 
+.version {
+  margin: 3rem 0 0;
+  color: rgba(148, 163, 184, 0.68);
+  font: 0.75rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: center;
+}
+
 a { color: var(--accent); }
 ul {
   list-style: none;
@@ -136,7 +144,7 @@ li::before {
 }
 
 @media (max-width: 520px) {
-  main { padding-top: 2rem; padding-bottom: 2rem; }
+  main { padding-top: 2rem; padding-bottom: 1rem; }
   .hero pre { font-size: clamp(8.75px, 2.56vw, 12.5px); }
   .intro { font-size: 1rem; }
 }
@@ -170,6 +178,8 @@ li::before {
       <li><a href="/asyncapi.json">AsyncAPI schema (JSON)</a></li>
     </ul>
   </nav>
+
+  <p class="version">{{version}}</p>
 </main>
 </body>
 </html>

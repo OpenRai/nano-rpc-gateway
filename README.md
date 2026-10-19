@@ -99,3 +99,64 @@ checks.
 
 Read [DESIGN.md](DESIGN.md) for the complete design, evidence boundaries, open
 questions, and proposed implementation sequence.
+
+## Build identity
+
+`Cargo.toml` owns the application release number. Executables, OpenRPC and AsyncAPI
+`info.version`, user agents, and OCI version metadata derive it automatically.
+Git adds source provenance; the image digest identifies the exact package,
+including its platform and base image. Rebuilding the same source against a newer
+base image can change the digest without changing the application release.
+
+```sh
+cargo run -- --version
+cargo run -- build-info
+cargo run --example ws_fault_relay -- --version
+cargo run --example ws_fault_relay -- --build-info
+```
+
+The JSON-RPC `version` method reports the upstream Nano node's version.
+
+The display stamp combines the release and `git describe --tags --always --dirty`.
+A matching clean release tag is displayed once. `build-info` retains the full
+commit SHA, Git description, and dirty status as separate fields. As with Git's
+`--dirty`, untracked files are excluded; a dirty stamp does not identify the exact
+modified bytes. Source archives without Git report unknown provenance. Runtime
+environment variables cannot change the identity embedded in an executable.
+
+When browser UI is enabled, `/api-landing-page` includes that same stamp directly
+in its HTML, alongside the configured Nano profile. No script or JSON-RPC request
+is needed. The startup banner and JSON startup logs also report the build.
+Generated contracts contain the release version, but no per-build Git metadata.
+
+OCI builds require host metadata because `.git` is excluded from their context.
+The wrappers need Cargo, Git, jq, and Docker; they read the release and license
+through Cargo metadata and capture source provenance before invoking Docker:
+
+```sh
+./scripts/build-image.sh --load --tag nano-rpc-gateway:local
+./scripts/build-image.sh --load --target ws-fault-relay --tag ws-fault-relay:local
+./scripts/with-build-metadata.sh docker compose -f docker-compose.dev.yml up -d --build
+# make devnet-up, make devnet-smoke, and make container-benchmark use the helper.
+docker run --rm --entrypoint /usr/local/bin/nano-rpc-gateway nano-rpc-gateway:local build-info
+docker image inspect nano-rpc-gateway:local --format '{{json .Config.Labels}}'
+docker image inspect nano-rpc-gateway:local --format '{{json .RepoDigests}}'
+```
+
+Both images carry standard OCI `version`, `revision`, `source`, and `licenses`
+labels, plus `com.github.openrai.nano-rpc-gateway.source.dirty` and
+`com.github.openrai.nano-rpc-gateway.source.description`. The source URL defaults
+to the Git origin; set `NANO_GATEWAY_SOURCE` to a public repository URL when needed.
+Raw Dockerfile builds must supply the six `NANO_GATEWAY_*` build arguments listed
+in `scripts/build-image.sh`; missing metadata or a release differing from Cargo
+fails the build. The Dockerfile makes no independent release-number assignment.
+
+For releases, use a clean checkout with complete tags, verify a `v<package.version>`
+tag, and tag the image with that release. Deploy using the published digest rather
+than a mutable tag. Publishing can use the same wrapper with
+`--push --provenance=mode=max --sbom=true --tag REGISTRY/IMAGE:RELEASE` instead of
+`--load`; provenance and SBOM attestations describe how the package was built and
+what it contains. Loading attestations locally requires a compatible containerd
+image store. No publishing workflow is installed by this change. See the
+[OCI metadata definitions](https://github.com/opencontainers/image-spec/blob/main/annotations.md)
+and [Docker attestation documentation](https://docs.docker.com/build/metadata/attestations/).

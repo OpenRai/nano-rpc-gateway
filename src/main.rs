@@ -7,8 +7,8 @@ use std::{
 use base64::Engine;
 use clap::{Parser, Subcommand, ValueEnum};
 use nano_rpc_gateway::{
-    app, asyncapi_document, generate_signing_key, openrpc_document_with_auth, playground_url,
-    sign_paseto, AppState, Config,
+    app, asyncapi_document, build_info, generate_signing_key, openrpc_document_with_auth,
+    playground_url, sign_paseto, AppState, Config,
 };
 use serde_json::json;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -24,7 +24,7 @@ enum LogFormat {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "nano-rpc-gateway", version)]
+#[command(name = "nano-rpc-gateway", version = build_info::version())]
 struct Cli {
     /// Terminal logs are human-readable by default; use JSON for log collectors.
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Pretty, env = "NANO_GATEWAY_LOG_FORMAT")]
@@ -70,9 +70,10 @@ fn render_startup_template(config_path: &Path, config: &Config) -> String {
 
 fn serve_banner(config_path: &Path, config: &Config, transport: &str) -> String {
     format!(
-        "\n{}\n\
+        "\n{}\nversion:   {}\n\
          transport={} common={} work={} rpc={} websocket={}",
         render_startup_template(config_path, config),
+        build_info::version(),
         transport,
         if config.require_common_auth {
             "authenticated"
@@ -99,12 +100,26 @@ fn serve_banner(config_path: &Path, config: &Config, transport: &str) -> String 
     )
 }
 
-fn print_serve_banner(config_path: &Path, config: &Config, transport: &str) {
-    eprintln!("{}", serve_banner(config_path, config, transport));
+fn log_serve_started(config_path: &Path, config: &Config, transport: &str, format: LogFormat) {
+    match format {
+        LogFormat::Pretty => eprintln!("{}", serve_banner(config_path, config, transport)),
+        LogFormat::Json => tracing::info!(
+            version = build_info::RELEASE_VERSION,
+            build = build_info::version(),
+            git_describe = build_info::BUILD_INFO.git_describe,
+            git_revision = build_info::BUILD_INFO.git_revision,
+            dirty = build_info::BUILD_INFO.dirty,
+            address = %config.listen,
+            transport,
+            "gateway started"
+        ),
+    }
 }
 
 #[derive(Debug, Subcommand)]
 enum CommandKind {
+    /// Print the embedded release and source identity as JSON.
+    BuildInfo,
     Serve {
         #[arg(long, default_value = "gateway.yaml")]
         config: PathBuf,
@@ -146,6 +161,9 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_logging(cli.log_format);
     match cli.command {
+        CommandKind::BuildInfo => {
+            println!("{}", serde_json::to_string_pretty(&build_info::json())?)
+        }
         CommandKind::Serve {
             config: config_path,
         } => {
@@ -176,22 +194,14 @@ async fn main() -> anyhow::Result<()> {
                         let tls =
                             axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
                         let listener = std::net::TcpListener::bind(&config.listen)?;
-                        if cli.log_format == LogFormat::Pretty {
-                            print_serve_banner(&config_path, &config, "https");
-                        } else {
-                            tracing::info!(address = %config.listen, transport = "https", "gateway started");
-                        }
+                        log_serve_started(&config_path, &config, "https", cli.log_format);
                         axum_server::from_tcp_rustls(listener, tls)
                             .serve(router.into_make_service())
                             .await?;
                     }
                     _ => {
                         let listener = tokio::net::TcpListener::bind(&config.listen).await?;
-                        if cli.log_format == LogFormat::Pretty {
-                            print_serve_banner(&config_path, &config, "http");
-                        } else {
-                            tracing::info!(address = %config.listen, transport = "http", "gateway started");
-                        }
+                        log_serve_started(&config_path, &config, "http", cli.log_format);
                         axum::serve(listener, router).await?;
                     }
                 }
@@ -311,6 +321,10 @@ mod tests {
 
         let banner = serve_banner(Path::new("gateway.yaml"), &config, "http");
 
+        assert!(banner.contains(&format!(
+            "version:   {}",
+            nano_rpc_gateway::build_info::version()
+        )));
         assert!(banner.contains("config:    gateway.yaml"));
         assert!(banner.contains("listener:  127.0.0.1:8090"));
         assert!(banner.contains("profile:   nano-node/V28.2"));

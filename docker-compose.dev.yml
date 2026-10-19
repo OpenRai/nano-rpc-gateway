@@ -18,6 +18,13 @@ services:
   gateway:
     build:
       context: .
+      args:
+        NANO_GATEWAY_VERSION: ${NANO_GATEWAY_VERSION:-}
+        NANO_GATEWAY_GIT_DESCRIBE: ${NANO_GATEWAY_GIT_DESCRIBE:-}
+        NANO_GATEWAY_GIT_REVISION: ${NANO_GATEWAY_GIT_REVISION:-}
+        NANO_GATEWAY_GIT_DIRTY: ${NANO_GATEWAY_GIT_DIRTY:-}
+        NANO_GATEWAY_SOURCE: ${NANO_GATEWAY_SOURCE:-}
+        NANO_GATEWAY_LICENSE: ${NANO_GATEWAY_LICENSE:-}
     depends_on: [nano]
     ports:
       - "127.0.0.1:8090:8090"

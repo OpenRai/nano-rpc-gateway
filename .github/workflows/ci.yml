@@ -3,21 +3,33 @@ on:
   push:
   pull_request:
 jobs:
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.89
+      - run: cargo check --all-targets --all-features --locked
   rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --all -- --check
       - run: cargo test --locked
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
       - run: cargo build --release --locked
-      - run: bash -n scripts/*.sh
+      - run: for script in scripts/*.sh; do bash -n "$script"; done
       - run: docker compose -f docker-compose.dev.yml config
   contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:

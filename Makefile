@@ -48,7 +48,7 @@ container-benchmark:
 transport-smoke:
 	./scripts/transport-smoke.sh
 devnet-up:
-	docker compose -f docker-compose.dev.yml up -d --build
+	./scripts/with-build-metadata.sh docker compose -f docker-compose.dev.yml up -d --build
 devnet-smoke:
 	START_DEVNET=1 ./scripts/devnet-smoke.sh
 devnet-down:
