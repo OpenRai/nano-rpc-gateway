@@ -3,7 +3,7 @@
 pub mod build_info;
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     convert::Infallible,
     path::Path,
     sync::{
@@ -1266,7 +1266,8 @@ fn build_openrpc_document(
     // Errors live under components, where the OpenRPC meta-schema expects them and
     // where each method's `#/components/errors/...` reference resolves.
     let mut components = serde_json::Map::new();
-    components.insert("schemas".into(), Value::Object(component_schemas()));
+    let schemas = reachable_component_schemas(&methods, component_schemas());
+    components.insert("schemas".into(), Value::Object(schemas));
     components.insert(
         "errors".into(),
         json!({
@@ -1282,6 +1283,51 @@ fn build_openrpc_document(
         "methods": methods,
         "components": Value::Object(components), "x-nano-profile": profile
     })
+}
+
+fn reachable_component_schemas(
+    methods: &[Value],
+    mut schemas: serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    let mut pending = HashSet::new();
+    for method in methods {
+        collect_schema_refs(method, &mut pending);
+    }
+
+    let mut reachable = HashSet::new();
+    while let Some(name) = pending.iter().next().cloned() {
+        pending.remove(&name);
+        if !reachable.insert(name.clone()) {
+            continue;
+        }
+        if let Some(schema) = schemas.get(&name) {
+            collect_schema_refs(schema, &mut pending);
+        }
+    }
+
+    schemas.retain(|name, _| reachable.contains(name));
+    schemas
+}
+
+fn collect_schema_refs(value: &Value, refs: &mut HashSet<String>) {
+    match value {
+        Value::Object(object) => {
+            if let Some(reference) = object.get("$ref").and_then(Value::as_str)
+                && let Some(name) = reference.strip_prefix("#/components/schemas/")
+            {
+                refs.insert(name.to_owned());
+            }
+            for child in object.values() {
+                collect_schema_refs(child, refs);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                collect_schema_refs(child, refs);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn openrpc_method(method: MethodSpec) -> Value {
@@ -3790,6 +3836,42 @@ mod tests {
         // work_validate and rpc.discover. work_generate is filtered out while
         // work is disabled.
         assert_eq!(document["methods"].as_array().expect("methods").len(), 15);
+    }
+
+    #[test]
+    fn openrpc_includes_only_schemas_reachable_from_enabled_methods() {
+        let disabled = openrpc_document_with_auth(
+            "nano-node/V28.2",
+            false,
+            false,
+            false,
+            "http://127.0.0.1:7076/rpc",
+            true,
+        );
+        let disabled_schemas = disabled["components"]["schemas"]
+            .as_object()
+            .expect("schemas");
+        assert!(!disabled_schemas.contains_key("WorkGenerateParams"));
+        assert!(!disabled_schemas.contains_key("WorkGenerateResult"));
+        assert!(!disabled_schemas.contains_key("WorkCancelParams"));
+        assert!(!disabled_schemas.contains_key("WorkCancelResult"));
+        assert!(disabled_schemas.contains_key("AccountBalanceResult"));
+
+        let enabled = openrpc_document_with_auth(
+            "nano-node/V28.2",
+            true,
+            true,
+            false,
+            "http://127.0.0.1:7076/rpc",
+            true,
+        );
+        let enabled_schemas = enabled["components"]["schemas"]
+            .as_object()
+            .expect("schemas");
+        assert!(enabled_schemas.contains_key("WorkGenerateParams"));
+        assert!(enabled_schemas.contains_key("WorkGenerateResult"));
+        assert!(enabled_schemas.contains_key("WorkCancelParams"));
+        assert!(enabled_schemas.contains_key("WorkCancelResult"));
     }
 
     #[test]

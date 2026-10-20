@@ -852,106 +852,6 @@
         ],
         "type": "object"
       },
-      "WorkCancelParams": {
-        "properties": {
-          "hash": {
-            "description": "Block hash whose work generation should stop.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "hash"
-        ],
-        "type": "object"
-      },
-      "WorkCancelResult": {
-        "properties": {
-          "success": {
-            "const": "",
-            "type": "string"
-          }
-        },
-        "required": [
-          "success"
-        ],
-        "type": "object"
-      },
-      "WorkGenerateParams": {
-        "properties": {
-          "account": {
-            "description": "Nano account forwarded to work peers when use_peers is true.",
-            "type": "string"
-          },
-          "block": {
-            "description": "Optional block for selecting difficulty; a JSON string or object.",
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "object"
-              }
-            ]
-          },
-          "difficulty": {
-            "description": "Optional 16-digit hexadecimal work difficulty.",
-            "type": "string"
-          },
-          "hash": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "json_block": {
-            "default": false,
-            "description": "Interpret block as a JSON object.",
-            "type": "boolean"
-          },
-          "multiplier": {
-            "description": "Optional positive multiplier; overrides difficulty.",
-            "exclusiveMinimum": 0,
-            "type": "number"
-          },
-          "use_peers": {
-            "default": false,
-            "description": "Query configured work peers when generating work.",
-            "type": "boolean"
-          },
-          "version": {
-            "enum": [
-              "work_1"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "hash"
-        ],
-        "type": "object"
-      },
-      "WorkGenerateResult": {
-        "properties": {
-          "difficulty": {
-            "type": "string"
-          },
-          "hash": {
-            "type": "string"
-          },
-          "multiplier": {
-            "type": "string"
-          },
-          "work": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "work",
-          "difficulty",
-          "multiplier",
-          "hash"
-        ],
-        "type": "object"
-      },
       "WorkValidateParams": {
         "properties": {
           "difficulty": {
@@ -2016,7 +1916,7 @@
       }
     }
   ],
-  "x-nano-artifact-sha256": "sha256:bb019ca9f42d2ad2abbad35b888bda51d42e0ae8da024083f0834bd0418c790a",
+  "x-nano-artifact-sha256": "sha256:84facda7d5575de1ef5ede83dfde82f7a0dee588c4399843406024ceed80af92",
   "x-nano-common-authentication": {
     "required": true
   },
