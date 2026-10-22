@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@asyncapi/modelina": "5.10.1",
-    "@asyncapi/parser": "3.6.3",
+    "@asyncapi/parser": "3.6.6",
     "@fontsource-variable/montserrat": "5.3.0",
     "@fontsource-variable/open-sans": "5.3.0",
     "@open-rpc/generator": "2.1.1",
