@@ -50,6 +50,13 @@ generation is disabled until a PASETO public key and explicit work policy are
 configured. Common methods, including `process`, require PASETO by default;
 set `require_common_auth: false` for an intentionally public Common profile.
 
+Token issuance defaults to a one-hour lifetime (`issue --ttl 3600`). For a trusted
+service deployment, `issue --secret '<operator signing key>' --scope work
+--no-expiry --subject nanosweeper-worker` issues a token with no `exp` claim.
+`--no-expiry` and `--ttl` cannot be combined. Signature, audience, and scope checks
+still apply. Revoke a non-expiring token by rotating the gateway signing key;
+this revokes every token signed by the old key and requires replacing them.
+
 Browser CORS defaults to `*`. The gateway is a public read surface and CORS is
 browser-enforced rather than access control, since non-browser clients already
 reach every endpoint regardless of the allowlist. Narrow `cors_origins` to the

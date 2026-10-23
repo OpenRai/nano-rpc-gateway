@@ -147,6 +147,9 @@ enum CommandKind {
         scope: String,
         #[arg(long, default_value_t = 3600)]
         ttl: u64,
+        /// Issue a service token without an expiry; revoke it by rotating the signing key.
+        #[arg(long, conflicts_with = "ttl")]
+        no_expiry: bool,
         #[arg(long, default_value = "developer")]
         subject: String,
     },
@@ -272,6 +275,7 @@ async fn main() -> anyhow::Result<()> {
             secret,
             scope,
             ttl,
+            no_expiry,
             subject,
         } => {
             let bytes: [u8; 32] = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -282,13 +286,15 @@ async fn main() -> anyhow::Result<()> {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs();
-            println!(
-                "{}",
-                sign_paseto(
-                    &json!({"aud":"nano-rpc-gateway","sub":subject,"scope":scope,"iat":now,"exp":now+ttl}),
-                    &key
-                )
-            );
+            let mut claims =
+                json!({"aud":"nano-rpc-gateway","sub":subject,"scope":scope,"iat":now});
+            if !no_expiry {
+                let expires_at = now
+                    .checked_add(ttl)
+                    .ok_or_else(|| anyhow::anyhow!("token TTL overflows the expiry timestamp"))?;
+                claims["exp"] = json!(expires_at);
+            }
+            println!("{}", sign_paseto(&claims, &key));
         }
     }
     Ok(())
@@ -300,7 +306,48 @@ mod tests {
 
     use nano_rpc_gateway::Config;
 
-    use super::{endpoint_label, serve_banner};
+    use super::{endpoint_label, serve_banner, Cli, CommandKind};
+    use clap::Parser;
+
+    #[test]
+    fn issue_accepts_explicit_no_expiry_and_rejects_a_simultaneous_ttl() {
+        let cli = Cli::try_parse_from([
+            "nano-rpc-gateway",
+            "issue",
+            "--secret",
+            "test-key",
+            "--no-expiry",
+        ])
+        .expect("no-expiry issuance arguments");
+        assert!(matches!(
+            cli.command,
+            CommandKind::Issue {
+                no_expiry: true,
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from([
+            "nano-rpc-gateway",
+            "issue",
+            "--secret",
+            "test-key",
+            "--no-expiry",
+            "--ttl",
+            "60"
+        ])
+        .is_err());
+        let default_cli =
+            Cli::try_parse_from(["nano-rpc-gateway", "issue", "--secret", "test-key"])
+                .expect("default issuance arguments");
+        assert!(matches!(
+            default_cli.command,
+            CommandKind::Issue {
+                no_expiry: false,
+                ttl: 3600,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn endpoint_labels_exclude_credentials_and_query_values() {

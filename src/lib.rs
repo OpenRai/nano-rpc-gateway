@@ -3740,10 +3740,10 @@ fn verify_paseto(token: &str, key: &VerifyingKey, scope: Scope) -> Result<Value,
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    if claims
-        .get("exp")
-        .and_then(Value::as_u64)
-        .is_none_or(|exp| exp < now)
+    // The issuer deliberately omits exp for non-expiring service tokens.
+    // A present expiry must still be a valid, unexpired timestamp.
+    if let Some(exp) = claims.get("exp")
+        && exp.as_u64().is_none_or(|exp| exp < now)
     {
         return Err(GatewayError::Auth("expired token".into()));
     }
@@ -4117,6 +4117,28 @@ mod tests {
             &key,
         );
         assert!(verify_paseto(&token, &key.verifying_key(), Scope::Work).is_ok());
+    }
+    #[test]
+    fn paseto_no_expiry_preserves_signature_scope_and_audience_checks() {
+        let key = generate_signing_key();
+        let token = sign_paseto(&json!({"aud":"nano-rpc-gateway","scope":"work"}), &key);
+        assert!(verify_paseto(&token, &key.verifying_key(), Scope::Work).is_ok());
+        assert!(verify_paseto(&token, &key.verifying_key(), Scope::Control).is_err());
+        let other_key = generate_signing_key();
+        assert!(verify_paseto(&token, &other_key.verifying_key(), Scope::Work).is_err());
+        let wrong_audience = sign_paseto(&json!({"aud":"other","scope":"work"}), &key);
+        assert!(verify_paseto(&wrong_audience, &key.verifying_key(), Scope::Work).is_err());
+    }
+    #[test]
+    fn paseto_rejects_malformed_expiry_instead_of_treating_it_as_no_expiry() {
+        let key = generate_signing_key();
+        for exp in [Value::Null, json!(-1), json!("tomorrow"), json!(0)] {
+            let token = sign_paseto(
+                &json!({"aud":"nano-rpc-gateway","scope":"work","exp":exp}),
+                &key,
+            );
+            assert!(verify_paseto(&token, &key.verifying_key(), Scope::Work).is_err());
+        }
     }
     #[test]
     fn paseto_rejects_expired_or_wrong_audience_claims() {
