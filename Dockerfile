@@ -70,9 +70,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
  && cp target/release/examples/ws_fault_relay /usr/local/bin/ws_fault_relay
 
 # Shared package metadata for both deliverables. No release literal lives here.
-FROM debian:bookworm-slim AS runtime-base
+FROM debian:trixie-slim AS runtime-base
 # Public upstream https/wss needs a trust store; curl supports the health check.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 10001 gateway \

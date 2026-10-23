@@ -4,7 +4,7 @@ set -euo pipefail
 session="${NANO_RPC_GATEWAY_TMUX_SESSION:-nano-rpc-gateway}"
 
 if ! command -v tmux >/dev/null 2>&1; then
-  echo "dev-tmux-stop requires tmux; install it and try again" >&2
+  echo "tmux-preview-stop requires tmux; install it and try again" >&2
   exit 1
 fi
 

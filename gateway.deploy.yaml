@@ -28,6 +28,10 @@ require_common_auth: false
 auth_public_key: "${NANOSWEEPER_GATEWAY_AUTH_PUBLIC_KEY}"
 
 allow_work: true
+work_provider: remote
+# Empty means use node_rpc_urls in the same order, including their API-key auth.
+work_peer_urls: []
+local_work_timeout_ms: 30000
 allow_control: true
 enable_discovery: true
 enable_browser_ui: true

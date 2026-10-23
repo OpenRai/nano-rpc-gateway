@@ -71,7 +71,7 @@ fn render_startup_template(config_path: &Path, config: &Config) -> String {
 fn serve_banner(config_path: &Path, config: &Config, transport: &str) -> String {
     format!(
         "\n{}\nversion:   {}\n\
-         transport={} common={} work={} rpc={} websocket={}",
+         transport={} common={} work={} work_provider={:?} rpc={} websocket={}",
         render_startup_template(config_path, config),
         build_info::version(),
         transport,
@@ -85,6 +85,7 @@ fn serve_banner(config_path: &Path, config: &Config, transport: &str) -> String 
         } else {
             "disabled"
         },
+        config.work_provider,
         config
             .node_rpc_urls
             .iter()
@@ -198,7 +199,7 @@ async fn main() -> anyhow::Result<()> {
                             axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
                         let listener = std::net::TcpListener::bind(&config.listen)?;
                         log_serve_started(&config_path, &config, "https", cli.log_format);
-                        axum_server::from_tcp_rustls(listener, tls)
+                        axum_server::from_tcp_rustls(listener, tls)?
                             .serve(router.into_make_service())
                             .await?;
                     }

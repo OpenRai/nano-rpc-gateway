@@ -17,6 +17,7 @@ target/
 .env
 .env.*
 !.env.example
+.cloudflare/
 
 # Rust build output and local caches.
 **/*.rs.bk

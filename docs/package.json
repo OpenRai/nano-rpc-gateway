@@ -8,14 +8,12 @@
     "validate:openrpc": "node scripts/validate-openrpc.mjs",
     "validate": "npm run validate:openrpc && npm run validate:asyncapi",
     "parity": "node scripts/check-parity.mjs",
-    "models": "node scripts/generate-model-smoke.mjs",
     "site": "node scripts/generate-site.mjs",
     "generate": "npm run contracts && npm run validate && npm run site && npm run client",
     "check": "node scripts/check-parity.mjs && node scripts/check-generated.mjs",
     "preview": "node scripts/preview.mjs"
   },
   "devDependencies": {
-    "@asyncapi/modelina": "5.10.1",
     "@asyncapi/parser": "3.6.6",
     "@fontsource-variable/montserrat": "5.3.0",
     "@fontsource-variable/open-sans": "5.3.0",
@@ -24,5 +22,8 @@
     "ajv": "8.20.0",
     "highlight.js": "11.12.0",
     "typescript": "5.9.2"
+  },
+  "engines": {
+    "node": ">=26.12.1 <27"
   }
 }

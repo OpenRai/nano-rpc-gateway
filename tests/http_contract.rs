@@ -159,6 +159,9 @@ fn test_config(node_rpc_url: String) -> Config {
         profile: "nano-node/test".into(),
         require_common_auth: true,
         allow_work: false,
+        work_provider: nano_rpc_gateway::WorkProvider::Remote,
+        work_peer_urls: Vec::new(),
+        local_work_timeout_ms: 30_000,
         allow_control: false,
         auth_public_key: None,
         enable_discovery: true,
@@ -585,13 +588,15 @@ async fn websocket_bridge_uses_standby_after_primary_disconnects() {
             .expect("subscribe frame");
         socket
             .send(tokio_tungstenite::tungstenite::Message::Text(
-                json!({"ack":"subscribe","topic":"confirmation"}).to_string(),
+                json!({"ack":"subscribe","topic":"confirmation"})
+                    .to_string()
+                    .into(),
             ))
             .await
             .expect("ack");
         publish_rx.await.expect("subscriber registered");
         socket.send(tokio_tungstenite::tungstenite::Message::Text(
-            json!({"topic":"confirmation","message":{"hash":"STANDBY", "account":"nano_sender", "block":{"type":"state","subtype":"send","link_as_account":"nano_player"}}}).to_string()
+            json!({"topic":"confirmation","message":{"hash":"STANDBY", "account":"nano_sender", "block":{"type":"state","subtype":"send","link_as_account":"nano_player"}}}).to_string().into()
         )).await.expect("standby confirmation");
         close_rx.await.expect("close trigger");
         socket.close(None).await.expect("close");
@@ -1139,7 +1144,7 @@ async fn asyncapi_advertises_configured_public_url_host() {
 #[test]
 fn public_url_must_be_an_absolute_http_url() {
     for invalid in ["not-a-url", "ftp://gw.example.test/rpc", "/rpc"] {
-        let config: Config = serde_yaml::from_str(&format!(
+        let config: Config = serde_saphyr::from_str(&format!(
             "listen: \"127.0.0.1:8090\"\n\
              node_rpc_urls: [\"http://127.0.0.1:7076\"]\n\
              node_ws_urls: [\"ws://127.0.0.1:7078\"]\n\
@@ -1155,7 +1160,7 @@ fn public_url_must_be_an_absolute_http_url() {
 
 #[test]
 fn public_url_defaults_to_absent_so_listen_is_advertised() {
-    let config: Config = serde_yaml::from_str(
+    let config: Config = serde_saphyr::from_str(
         "listen: \"127.0.0.1:8090\"\n\
          node_rpc_urls: [\"http://127.0.0.1:7076\"]\n\
          node_ws_urls: [\"ws://127.0.0.1:7078\"]\n",
@@ -1320,7 +1325,7 @@ async fn ws_close_transport_error_and_task_abort_close_every_sse_subscriber() {
             let mut ws = tokio_tungstenite::accept_async(stream).await.expect("WS");
             ws.next().await.expect("subscribe").expect("frame");
             ws.send(tokio_tungstenite::tungstenite::Message::Binary(
-                json!({"ack":"subscribe"}).to_string().into_bytes(),
+                json!({"ack":"subscribe"}).to_string().into_bytes().into(),
             ))
             .await
             .expect("binary ack");
@@ -1727,7 +1732,9 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
         assert!(subscribe.contains("\"topic\":\"confirmation\""));
         socket
             .send(tokio_tungstenite::tungstenite::Message::Text(
-                json!({"ack":"subscribe","topic":"confirmation"}).to_string(),
+                json!({"ack":"subscribe","topic":"confirmation"})
+                    .to_string()
+                    .into(),
             ))
             .await
             .expect("subscribe ack");
@@ -1750,7 +1757,8 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
                         }
                     }
                 })
-                .to_string(),
+                .to_string()
+                .into(),
             ))
             .await
             .expect("confirmation");
@@ -1770,6 +1778,9 @@ async fn deterministic_public_flow_subscribes_before_process_and_refreshes_accou
         profile: "nano-node/test".into(),
         require_common_auth: true,
         allow_work: false,
+        work_provider: nano_rpc_gateway::WorkProvider::Remote,
+        work_peer_urls: Vec::new(),
+        local_work_timeout_ms: 30_000,
         allow_control: false,
         auth_public_key: Some(
             base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -1977,7 +1988,9 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
             .expect("subscribe");
         socket
             .send(tokio_tungstenite::tungstenite::Message::Text(
-                json!({"ack":"subscribe","topic":"confirmation"}).to_string(),
+                json!({"ack":"subscribe","topic":"confirmation"})
+                    .to_string()
+                    .into(),
             ))
             .await
             .expect("subscribe ack");
@@ -1988,7 +2001,8 @@ async fn sse_fanout_benchmark_delivers_one_event_to_all_clients() {
                     "topic":"confirmation",
                     "message":{"account":"nano_fanout","hash":"FANOUT-HASH"}
                 })
-                .to_string(),
+                .to_string()
+                .into(),
             ))
             .await
             .expect("confirmation");
@@ -2106,6 +2120,77 @@ async fn valid_work_token_reaches_node_delegation() {
     )
     .await;
     assert_eq!(response["result"]["hash"], "A");
+}
+
+#[tokio::test]
+async fn local_work_provider_generates_valid_work_without_using_upstreams() {
+    let key = generate_signing_key();
+    let mut config = test_config(start_non_json_status_stub(StatusCode::SERVICE_UNAVAILABLE).await);
+    config.allow_work = true;
+    config.work_provider = nano_rpc_gateway::WorkProvider::Local;
+    config.auth_public_key = Some(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.verifying_key().to_bytes()),
+    );
+    let state = AppState::new(config).expect("state");
+    let token = sign_paseto(
+        &json!({"aud":"nano-rpc-gateway","sub":"test","scope":"work","exp":4_000_000_000u64}),
+        &key,
+    );
+    let hash = "00".repeat(32);
+    let response = rpc_with_auth(
+        state,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "work_generate",
+            "params": {"hash": hash, "difficulty": "fe00000000000000"},
+            "id": 1
+        })
+        .to_string(),
+        &token,
+    )
+    .await;
+
+    assert!(response["error"].is_null(), "{response}");
+    let result = &response["result"];
+    assert_eq!(result["hash"], "00".repeat(32));
+    let nonce = u64::from_str_radix(result["work"].as_str().expect("work"), 16).expect("hex work");
+    let mut hash_bytes = [0u8; 32];
+    hash_bytes.copy_from_slice(&[0u8; 32]);
+    assert!(nano_rspow::difficulty::is_valid(
+        &hash_bytes,
+        nonce,
+        0xfe00000000000000,
+    ));
+}
+
+#[tokio::test]
+async fn local_provider_routes_explicit_peer_and_ledger_threshold_requests_to_work_peers() {
+    let key = generate_signing_key();
+    let mut config = test_config(start_non_json_status_stub(StatusCode::SERVICE_UNAVAILABLE).await);
+    config.allow_work = true;
+    config.work_provider = nano_rpc_gateway::WorkProvider::Local;
+    config.work_peer_urls = vec![start_native_stub().await];
+    config.auth_public_key = Some(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.verifying_key().to_bytes()),
+    );
+    let state = AppState::new(config).expect("state");
+    let token = sign_paseto(
+        &json!({"aud":"nano-rpc-gateway","sub":"test","scope":"work","exp":4_000_000_000u64}),
+        &key,
+    );
+    for params in [
+        json!({"hash":"A","use_peers":true}),
+        json!({"hash":"A","block":{},"json_block":true}),
+    ] {
+        let response = rpc_with_auth(
+            state.clone(),
+            &json!({"jsonrpc":"2.0","method":"work_generate","params":params,"id":1}).to_string(),
+            &token,
+        )
+        .await;
+        assert!(response["error"].is_null(), "{response}");
+        assert_eq!(response["result"]["work"], "B");
+    }
 }
 
 #[tokio::test]

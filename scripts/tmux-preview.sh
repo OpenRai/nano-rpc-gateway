@@ -4,7 +4,7 @@ set -euo pipefail
 session="${NANO_RPC_GATEWAY_TMUX_SESSION:-nano-rpc-gateway}"
 
 if ! command -v tmux >/dev/null 2>&1; then
-  echo "dev-tmux requires tmux; install it and try again" >&2
+  echo "tmux-preview requires tmux; install it and try again" >&2
   exit 1
 fi
 
@@ -13,7 +13,7 @@ root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 # config at gateway.yaml is intentionally local-only and commonly contains
 # unset credential placeholders; select it explicitly when those credentials
 # are configured.
-config="${NANO_GATEWAY_CONFIG:-gateway.dev.yaml}"
+config="${NANO_GATEWAY_CONFIG:-gateway.preview.yaml}"
 config_path="$config"
 if [[ "$config_path" != /* ]]; then
   config_path="$root_dir/$config_path"
@@ -24,7 +24,7 @@ if tmux has-session -t "$session" 2>/dev/null; then
   exit 1
 fi
 
-echo "tmux reminder: Ctrl-b d detaches without stopping the gateway; stop it with: make dev-tmux-stop"
+echo "tmux reminder: Ctrl-b d detaches without stopping the gateway; stop it with: make tmux-preview-stop"
 tmux new-session -d -s "$session" -n gateway -c "$root_dir"
 
 # A long-lived tmux server may predate credentials exported in this shell.
@@ -56,8 +56,8 @@ tmux select-pane -t "$gateway_pane" -T 'GATEWAY'
 
 echo "Started gateway in tmux session '$session' using $config."
 echo "Attach later with: tmux attach -t $session"
-echo "Override the config with: NANO_GATEWAY_CONFIG=/path/to/config make dev-tmux"
-echo "Stop it with: make dev-tmux-stop"
+echo "Override the config with: NANO_GATEWAY_CONFIG=/path/to/config make tmux-preview"
+echo "Stop it with: make tmux-preview-stop"
 if [[ -t 0 && -t 1 ]]; then
   exec tmux attach-session -t "$session"
 fi

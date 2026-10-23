@@ -8,7 +8,7 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex as StdMutex,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::sync::{broadcast, watch, Mutex};
+use tokio::sync::{broadcast, watch, Mutex, OnceCell, Semaphore};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{
@@ -64,6 +64,9 @@ node_ws_urls:
 profile: "nano-node/V28.2"
 require_common_auth: true
 allow_work: false
+work_provider: remote
+work_peer_urls: []
+local_work_timeout_ms: 30000
 allow_control: false
 auth_public_key: null
 enable_discovery: true
@@ -110,6 +113,16 @@ pub struct Config {
     pub require_common_auth: bool,
     #[serde(default)]
     pub allow_work: bool,
+    /// Selects the exclusive default work provider. Request-level Nano options may
+    /// explicitly require peer work or a ledger-derived threshold.
+    #[serde(default)]
+    pub work_provider: WorkProvider,
+    /// Ordered work-peer RPC endpoints. An empty list follows `node_rpc_urls`.
+    #[serde(default)]
+    pub work_peer_urls: Vec<String>,
+    /// Deadline for a local generator before its work job is cancelled.
+    #[serde(default = "default_local_work_timeout_ms")]
+    pub local_work_timeout_ms: u64,
     #[serde(default)]
     pub allow_control: bool,
     pub auth_public_key: Option<String>,
@@ -130,6 +143,14 @@ pub struct Config {
     pub tls_key: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkProvider {
+    Local,
+    #[default]
+    Remote,
+}
+
 fn default_listen() -> String {
     "127.0.0.1:8090".into()
 }
@@ -141,6 +162,9 @@ fn default_ws_urls() -> Vec<String> {
 }
 fn default_profile() -> String {
     "nano-node/V28.2".into()
+}
+fn default_local_work_timeout_ms() -> u64 {
+    30_000
 }
 fn default_require_common_auth() -> bool {
     true
@@ -154,7 +178,7 @@ fn default_cors_origins() -> Vec<String> {
 
 impl Default for Config {
     fn default() -> Self {
-        serde_yaml::from_str(DEFAULT_CONFIG).expect("default config is valid")
+        serde_saphyr::from_str(DEFAULT_CONFIG).expect("default config is valid")
     }
 }
 
@@ -173,7 +197,7 @@ impl Config {
                         .ok()
                         .or_else(|| dotenv.get(name).cloned())
                 })?;
-                serde_yaml::from_str::<Self>(&contents)
+                serde_saphyr::from_str::<Self>(&contents)
                     .map_err(GatewayError::Config)
                     .and_then(|config| config.validate())
             }
@@ -191,7 +215,7 @@ impl Config {
         }
     }
 
-    pub fn validate(self) -> Result<Self, GatewayError> {
+    pub fn validate(mut self) -> Result<Self, GatewayError> {
         if self.node_rpc_urls.is_empty() || self.node_ws_urls.is_empty() {
             return Err(GatewayError::InvalidRequest(
                 "node_rpc_urls and node_ws_urls must each be non-empty".into(),
@@ -202,6 +226,17 @@ impl Config {
         }
         for endpoint in &self.node_ws_urls {
             validate_upstream_url(endpoint, &["ws", "wss"])?;
+        }
+        if self.work_peer_urls.is_empty() {
+            self.work_peer_urls.clone_from(&self.node_rpc_urls);
+        }
+        for endpoint in &self.work_peer_urls {
+            validate_upstream_url(endpoint, &["http", "https"])?;
+        }
+        if !(100..=300_000).contains(&self.local_work_timeout_ms) {
+            return Err(GatewayError::InvalidRequest(
+                "local_work_timeout_ms must be between 100 and 300000".into(),
+            ));
         }
         if self.tls_cert.is_some() != self.tls_key.is_some() {
             return Err(GatewayError::InvalidRequest(
@@ -305,7 +340,7 @@ fn is_environment_name(name: &str) -> bool {
 #[derive(Debug, Error)]
 pub enum GatewayError {
     #[error("configuration: {0}")]
-    Config(serde_yaml::Error),
+    Config(serde_saphyr::Error),
     #[error("configuration: {0}")]
     ConfigValue(String),
     #[error("io: {0}")]
@@ -2075,10 +2110,40 @@ fn is_block_hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn decode_work_hash(value: &str) -> Result<[u8; 32], GatewayError> {
+    if !is_block_hash(value) {
+        return Err(GatewayError::InvalidRequest(
+            "invalid parameter: hash must be 64 hexadecimal characters".into(),
+        ));
+    }
+    let mut decoded = [0u8; 32];
+    let (pairs, _) = value.as_bytes().as_chunks::<2>();
+    for (index, pair) in pairs.iter().enumerate() {
+        let byte = std::str::from_utf8(pair)
+            .ok()
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            .ok_or_else(|| GatewayError::InvalidRequest("invalid parameter: hash".into()))?;
+        decoded[index] = byte;
+    }
+    Ok(decoded)
+}
+
+fn nano_bool(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::String(value)) => value.eq_ignore_ascii_case("true"),
+        _ => false,
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
     pub native: NativeRouter,
+    work_peers: NativeRouter,
+    local_work_jobs: Arc<StdMutex<HashMap<String, nano_rspow::CancelToken>>>,
+    remote_work_jobs: Arc<StdMutex<HashSet<String>>>,
+    local_work_slots: Arc<Semaphore>,
     pub events: EventHub,
     pub metrics: Metrics,
     pub verifying_key: Option<VerifyingKey>,
@@ -2125,6 +2190,38 @@ impl Drop for RequestMetricsGuard {
             .fetch_add(1, Ordering::Relaxed);
     }
 }
+
+struct LocalWorkJobGuard {
+    hash: String,
+    jobs: Arc<StdMutex<HashMap<String, nano_rspow::CancelToken>>>,
+    token: nano_rspow::CancelToken,
+}
+
+impl Drop for LocalWorkJobGuard {
+    fn drop(&mut self) {
+        self.token.cancel();
+        self.jobs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.hash);
+    }
+}
+
+struct RemoteWorkJobGuard {
+    hash: String,
+    jobs: Arc<StdMutex<HashSet<String>>>,
+}
+
+impl Drop for RemoteWorkJobGuard {
+    fn drop(&mut self) {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.hash);
+    }
+}
+
+static LOCAL_WORK_GENERATOR: OnceCell<nano_rspow::WorkGenerator> = OnceCell::const_new();
 
 impl Drop for ActiveStreamGuard {
     fn drop(&mut self) {
@@ -2175,6 +2272,94 @@ impl AppState {
         ))
     }
 
+    async fn generate_local_work(&self, params: &Value) -> Result<Value, GatewayError> {
+        let hash = params.get("hash").and_then(Value::as_str).ok_or_else(|| {
+            GatewayError::InvalidRequest("missing required parameter: hash".into())
+        })?;
+        let hash_bytes = decode_work_hash(hash)?;
+        let base_threshold = nano_rspow::thresholds::current::SEND;
+        let threshold = if let Some(difficulty) = params.get("difficulty").and_then(Value::as_str) {
+            u64::from_str_radix(difficulty, 16)
+                .map_err(|_| GatewayError::InvalidRequest("invalid parameter: difficulty".into()))?
+        } else if let Some(multiplier) = params.get("multiplier").and_then(Value::as_f64) {
+            let maximum = u64::MAX as f64;
+            (maximum - ((maximum - base_threshold as f64) / multiplier)) as u64
+        } else {
+            base_threshold
+        };
+        let hash_key = hash.to_ascii_uppercase();
+        let permit = self
+            .local_work_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| {
+                GatewayError::UpstreamUnavailable("local work generator is busy".into())
+            })?;
+        let token = nano_rspow::CancelToken::new();
+        {
+            let mut jobs = self
+                .local_work_jobs
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if jobs.contains_key(&hash_key) {
+                return Err(GatewayError::UpstreamUnavailable(
+                    "work is already being generated for this hash".into(),
+                ));
+            }
+            jobs.insert(hash_key.clone(), token.clone());
+        }
+        let _job_guard = LocalWorkJobGuard {
+            hash: hash_key.clone(),
+            jobs: self.local_work_jobs.clone(),
+            token: token.clone(),
+        };
+        let generator = LOCAL_WORK_GENERATOR
+            .get_or_try_init(|| async {
+                tokio::task::spawn_blocking(nano_rspow::WorkGenerator::auto)
+                    .await
+                    .map_err(|error| GatewayError::Upstream(error.to_string()))
+            })
+            .await?;
+        tracing::debug!(
+            provider = "local",
+            backend = generator.backend_name(),
+            "generating Nano work locally"
+        );
+        let task_token = token.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            generator.generate_with_cancel(&hash_bytes, threshold, &task_token)
+        });
+        let generated = match tokio::time::timeout(
+            Duration::from_millis(self.config.local_work_timeout_ms),
+            task,
+        )
+        .await
+        {
+            Ok(Ok(Some(result))) => result,
+            Ok(Ok(None)) => {
+                return Err(GatewayError::NodeRejected(
+                    "Work generation was cancelled".into(),
+                ))
+            }
+            Ok(Err(error)) => return Err(GatewayError::Upstream(error.to_string())),
+            Err(_) => {
+                token.cancel();
+                return Err(GatewayError::UpstreamUnavailable(
+                    "local work generation timed out".into(),
+                ));
+            }
+        };
+        let multiplier =
+            nano_rspow::thresholds::to_multiplier(generated.difficulty, base_threshold);
+        Ok(json!({
+            "hash": hash,
+            "work": generated.nonce_hex(),
+            "difficulty": generated.difficulty_hex(),
+            "multiplier": format!("{multiplier:.15}")
+        }))
+    }
+
     async fn mark_ws_unhealthy(&self, index: usize) {
         self.ws_unhealthy_until.lock().await[index] = Instant::now() + UPSTREAM_COOLDOWN;
         let next = (index + 1) % self.config.node_ws_urls.len();
@@ -2189,6 +2374,13 @@ impl AppState {
             .transpose()?;
         Ok(Self {
             native: NativeRouter::with_response_logging(&config.node_rpc_urls, config.log_rpc)?,
+            work_peers: NativeRouter::with_response_logging(
+                &config.work_peer_urls,
+                config.log_rpc,
+            )?,
+            local_work_jobs: Arc::new(StdMutex::new(HashMap::new())),
+            remote_work_jobs: Arc::new(StdMutex::new(HashSet::new())),
+            local_work_slots: Arc::new(Semaphore::new(1)),
             events: EventHub::with_capacity(SSE_QUEUE_CAPACITY),
             metrics: Metrics::default(),
             ws_active: Arc::new(AtomicUsize::new(0)),
@@ -2287,7 +2479,67 @@ impl AppState {
         // Translation-layer item 6: an operator guard refuses the call at the
         // transport layer, so it can never appear as a JSON-RPC error body.
         self.guard(spec.name, &params).await?;
-        match self.native.call(spec.name, &params).await {
+        let work_hash = params
+            .get("hash")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        let result = match spec.name {
+            "work_generate" if self.config.work_provider == WorkProvider::Remote => {
+                self.remote_work_jobs
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(work_hash.clone());
+                let _job_guard = RemoteWorkJobGuard {
+                    hash: work_hash.clone(),
+                    jobs: self.remote_work_jobs.clone(),
+                };
+                self.work_peers.call("work_generate", &params).await
+            }
+            "work_generate"
+                if nano_bool(params.get("use_peers"))
+                    || (params.get("block").is_some()
+                        && params.get("difficulty").is_none()
+                        && params.get("multiplier").is_none()) =>
+            {
+                // These options explicitly request behavior that depends on the Nano
+                // node: `use_peers` selects peer generation, and a block without an
+                // explicit threshold asks the ledger to derive its threshold.
+                self.remote_work_jobs
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(work_hash.clone());
+                let _job_guard = RemoteWorkJobGuard {
+                    hash: work_hash,
+                    jobs: self.remote_work_jobs.clone(),
+                };
+                self.work_peers.call("work_generate", &params).await
+            }
+            "work_generate" => self.generate_local_work(&params).await,
+            "work_cancel" if self.config.work_provider == WorkProvider::Local => {
+                if self
+                    .remote_work_jobs
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .contains(&work_hash)
+                {
+                    self.work_peers.call("work_cancel", &params).await
+                } else {
+                    if let Some(token) = self
+                        .local_work_jobs
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .get(&work_hash)
+                    {
+                        token.cancel();
+                    }
+                    Ok(json!({"success": ""}))
+                }
+            }
+            "work_cancel" => self.work_peers.call("work_cancel", &params).await,
+            _ => self.native.call(spec.name, &params).await,
+        };
+        match result {
             // Forward upstream results unchanged except for the guarded work_generate
             // alias normalization below, then validate against the pinned profile.
             Ok(mut result) => {
@@ -3540,7 +3792,7 @@ async fn run_ws_bridge_with_confirmation_liveness(
                     // subscriber that did not ask for them does not receive them.
                     "include_election_info":true,
                     "include_sideband_info":true
-                }}).to_string(),
+                }}).to_string().into(),
             ))
             .await
         {
@@ -3604,7 +3856,7 @@ async fn run_ws_bridge_with_confirmation_liveness(
                     if awaiting_pong {
                         return Err(GatewayError::UpstreamUnavailable("websocket heartbeat timed out".into()));
                     }
-                    socket.send(Message::Ping(vec![])).await.map_err(|error| GatewayError::UpstreamTransport(error.to_string()))?;
+                    socket.send(Message::Ping(vec![].into())).await.map_err(|error| GatewayError::UpstreamTransport(error.to_string()))?;
                     awaiting_pong = true;
                     continue;
                 }
@@ -3809,7 +4061,7 @@ mod tests {
     fn shipped_example_config_parses_and_validates() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("gateway.yaml.example");
         let contents = std::fs::read_to_string(&path).expect("gateway.yaml.example is readable");
-        let config: Config = serde_yaml::from_str(&contents).expect("example config parses");
+        let config: Config = serde_saphyr::from_str(&contents).expect("example config parses");
         config.clone().validate().expect("example config validates");
         assert_eq!(config.cors_origins, vec!["*".to_owned()]);
         assert!(config.public_url.is_none());
@@ -4581,11 +4833,73 @@ node_ws_urls:
     fn default_config_keeps_elevated_operations_disabled() {
         let config = Config::default();
         assert!(!config.allow_work && !config.allow_control);
+        assert_eq!(config.work_provider, WorkProvider::Remote);
+    }
+
+    #[test]
+    fn work_provider_config_defaults_peers_to_ordered_rpc_urls() {
+        let config = Config {
+            node_rpc_urls: vec![
+                "https://rpc-one.example".into(),
+                "https://rpc-two.example".into(),
+            ],
+            work_peer_urls: Vec::new(),
+            ..Config::default()
+        }
+        .validate()
+        .expect("valid provider config");
+        assert_eq!(config.work_peer_urls, config.node_rpc_urls);
+
+        let local: Config =
+            serde_saphyr::from_str("work_provider: local\nlocal_work_timeout_ms: 5000")
+                .expect("local provider config");
+        assert_eq!(local.work_provider, WorkProvider::Local);
+        assert_eq!(local.local_work_timeout_ms, 5000);
+    }
+
+    #[tokio::test]
+    async fn local_work_can_be_cancelled_and_releases_its_slot() {
+        let config = Config {
+            work_provider: WorkProvider::Local,
+            ..Config::default()
+        };
+        let state = AppState::new(config).expect("local provider state");
+        let job_state = state.clone();
+        let job = tokio::spawn(async move {
+            job_state
+                .generate_local_work(&json!({
+                    "hash": "00".repeat(32),
+                    "difficulty": "ffffffffffffffff"
+                }))
+                .await
+        });
+        let hash = "00".repeat(32);
+        for _ in 0..1000 {
+            if state.local_work_jobs.lock().unwrap().contains_key(&hash) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let token = state
+            .local_work_jobs
+            .lock()
+            .unwrap()
+            .get(&hash)
+            .cloned()
+            .expect("local job registered");
+        token.cancel();
+
+        assert!(matches!(
+            job.await.expect("work task"),
+            Err(GatewayError::NodeRejected(_))
+        ));
+        assert!(state.local_work_jobs.lock().unwrap().is_empty());
+        assert_eq!(state.local_work_slots.available_permits(), 1);
     }
     #[test]
     fn request_logging_is_disabled_by_default_and_configurable() {
         assert!(!Config::default().log_rpc);
-        let config: Config = serde_yaml::from_str("log_rpc: true").expect("config");
+        let config: Config = serde_saphyr::from_str("log_rpc: true").expect("config");
         assert!(config.log_rpc);
     }
     #[test]
@@ -4648,7 +4962,7 @@ node_ws_urls:
     #[test]
     fn live_v28_fixture_corpus_is_valid_and_profiled() {
         let manifest: Value =
-            serde_yaml::from_str(include_str!("../fixtures/native/v28.2/manifest.yaml"))
+            serde_saphyr::from_str(include_str!("../fixtures/native/v28.2/manifest.yaml"))
                 .expect("v28 manifest");
         assert_eq!(manifest["implementation"], "nano-node");
         assert_eq!(manifest["release"], "V28.2");
@@ -4933,7 +5247,7 @@ node_ws_urls:
             let mut socket = accept_async(stream).await.expect("handshake");
             socket.next().await.expect("subscribe").expect("frame");
             socket
-                .send(Message::Text(json!({"ack":"subscribe"}).to_string()))
+                .send(Message::Text(json!({"ack":"subscribe"}).to_string().into()))
                 .await
                 .expect("ack");
             // Hold the TCP connection open without reading/responding to ping.
@@ -4979,7 +5293,7 @@ node_ws_urls:
             let mut socket = accept_async(stream).await.expect("handshake");
             socket.next().await.expect("subscribe").expect("frame");
             socket
-                .send(Message::Text(json!({"ack":"subscribe"}).to_string()))
+                .send(Message::Text(json!({"ack":"subscribe"}).to_string().into()))
                 .await
                 .expect("ack");
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -5051,13 +5365,14 @@ node_ws_urls:
                 .send(Message::Binary(
                     json!({"ack":"subscribe","topic":"confirmation"})
                         .to_string()
-                        .into_bytes(),
+                        .into_bytes()
+                        .into(),
                 ))
                 .await
                 .expect("ack");
             ready_to_deliver.await.expect("subscriber registered");
             socket
-                .send(Message::Ping(vec![1, 2, 3]))
+                .send(Message::Ping(vec![1, 2, 3].into()))
                 .await
                 .expect("ping");
             let pong = tokio::time::timeout(Duration::from_secs(1), socket.next())
@@ -5081,7 +5396,8 @@ node_ws_urls:
             socket
                 .send(Message::Text(
                     json!({"topic":"confirmation","message":{"hash":"A","account":"nano_test"}})
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 ))
                 .await
                 .expect("duplicate confirmation");
@@ -5161,7 +5477,7 @@ node_ws_urls:
             socket.next().await.expect("subscribe").expect("frame");
             socket
                 .send(Message::Text(
-                    json!({"error":"subscription rejected"}).to_string(),
+                    json!({"error":"subscription rejected"}).to_string().into(),
                 ))
                 .await
                 .expect("reject");
@@ -5196,7 +5512,7 @@ node_ws_urls:
                     .expect("subscribe text")
                     .contains("confirmation"));
                 socket
-                    .send(Message::Text(json!({"ack":"subscribe"}).to_string()))
+                    .send(Message::Text(json!({"ack":"subscribe"}).to_string().into()))
                     .await
                     .expect("ack");
                 socket.close(None).await.expect("close");

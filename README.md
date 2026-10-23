@@ -69,10 +69,18 @@ a reverse proxy or tunnel fronts the gateway, including when TLS terminates
 upstream of it. Left unset, the advertised URL is derived from the local bind
 address, which is correct only for a directly reachable listener.
 
-For the tmux development launcher, use `make dev-tmux`. It starts with the
-local credential-free `gateway.dev.yaml` (created from built-in safe defaults);
+For the tmux development launcher, use `make tmux-preview`. It starts with the
+local credential-free `gateway.preview.yaml` (created from built-in safe defaults);
 select a local credentialed
-configuration explicitly with `NANO_GATEWAY_CONFIG=gateway.yaml make dev-tmux`.
+configuration explicitly with `NANO_GATEWAY_CONFIG=gateway.yaml make tmux-preview`.
+
+Work generation is independently configured with `work_provider`. Use `local`
+to generate with the embedded GPU-first `nano-rspow` provider, or `remote` to
+forward work to `work_peer_urls`. An empty peer list follows `node_rpc_urls`.
+The development deployment uses remote work peers; local preview uses local work.
+In local mode, Nano requests that explicitly select peers or ask the node to derive
+a block threshold use the work-peer pool. A provider error never triggers a switch
+between local and remote modes.
 
 Upstream selection and failure events are always logged with a redacted
 `upstream_url`, for both RPC and WebSocket transports. Detailed JSON-RPC and SSE

@@ -33,7 +33,16 @@ hash, request ID, token, or raw error text is used as a metric label.
    Nano RPC V28. The gateway renames `frontier` to `hash` only when it exactly matches
    the requested work root, and logs that compatibility remap. A mismatched value is
    still rejected. Continue to ask Nano.to to make the live response match its docs.
-3. Leave `allow_work` and `allow_control` disabled unless the corresponding
+3. Choose `work_provider` explicitly. `local` generates work with the embedded
+   GPU-first `nano-rspow` provider; `remote` forwards work requests to the ordered
+   `work_peer_urls` pool. An empty work-peer list uses `node_rpc_urls`, including
+   their configured upstream authentication. Local generation has one concurrent
+   slot and a configurable `local_work_timeout_ms` deadline. Local-provider requests
+   with `use_peers: true`, or with a block but no explicit difficulty or multiplier,
+   use the work-peer pool because those Nano options request peer work or a
+   ledger-derived threshold. Provider failures do not switch modes.
+
+   Leave `allow_work` and `allow_control` disabled unless the corresponding
    policy and PASETO verification key have been reviewed. These flags enable
    Work-scope `work_generate` and Control-scope `work_cancel`; `work_validate`
    follows the Common-method authentication policy. Set
